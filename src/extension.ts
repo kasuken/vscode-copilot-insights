@@ -53,7 +53,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.html = this._getLoadingHtml();
 
-		// Load Copilot data
+		// Load Copilot data when view becomes visible
+		webviewView.onDidChangeVisibility(() => {
+			if (webviewView.visible) {
+				this.loadCopilotData();
+			}
+		});
+
+		// Load initial data
 		this.loadCopilotData();
 	}
 
@@ -81,7 +88,6 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			}
 
 			const data = await response.json() as CopilotUserData;
-			console.log('Copilot API Response:', JSON.stringify(data, null, 2));
 			this._updateWithData(data);
 
 		} catch (error) {
@@ -229,43 +235,23 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 		// Check if data is stale (> 1 hour old)
 		const isStale = new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
 
-		// Debug: Add raw data display
-		const debugHtml = `
-			<details style="margin: 16px 0; font-size: 11px;">
-				<summary style="cursor: pointer; color: var(--vscode-descriptionForeground);">
-					🔍 Debug: View Raw API Response
-				</summary>
-				<pre style="
-					background-color: var(--vscode-textCodeBlock-background);
-					padding: 8px;
-					border-radius: 4px;
-					overflow-x: auto;
-					white-space: pre-wrap;
-					word-wrap: break-word;
-					font-size: 11px;
-					margin-top: 8px;
-				">${JSON.stringify(data, null, 2)}</pre>
-			</details>
-		`;
-
 		// Generate summary cards HTML
 		const summaryCardsHtml = `
-			<div class="summary-cards">
-				<div class="summary-card">
-					<div class="card-label">Plan</div>
-					<div class="card-value">${data.copilot_plan || 'Unknown'}</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label">Chat</div>
-					<div class="card-value">${data.chat_enabled ? 'Enabled' : 'Disabled'}</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label">Reset in</div>
-					<div class="card-value">${timeUntilReset.days}d ${timeUntilReset.hours}h</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label">Orgs</div>
-					<div class="card-value">${orgCount}${orgCount > 1 ? ' 🔗' : ''}</div>
+			<div class="section">
+				<h2 class="section-title">Plan Details</h2>
+				<div class="summary-cards">
+					<div class="summary-card">
+						<div class="card-label">Plan</div>
+						<div class="card-value">${data.copilot_plan || 'Unknown'}</div>
+					</div>
+					<div class="summary-card">
+						<div class="card-label">Chat</div>
+						<div class="card-value">${data.chat_enabled ? 'Enabled' : 'Disabled'}</div>
+					</div>
+					<div class="summary-card">
+						<div class="card-label">Orgs</div>
+						<div class="card-value">${orgCount}${orgCount > 1 ? ' 🔗' : ''}</div>
+					</div>
 				</div>
 			</div>
 		`;
@@ -295,7 +281,22 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				let pacingHtml = '';
 				if (timeUntilReset.totalDays > 0) {
 					const allowedPerDay = Math.floor(quota.remaining / timeUntilReset.totalDays);
-					pacingHtml = `<div class="quota-pacing">To last until reset: ≤ ${allowedPerDay}/day</div>`;
+					pacingHtml = `
+						<div class="quota-pacing-highlight">
+							<div class="pacing-row">
+								<span class="pacing-label">To last until reset:</span>
+								<span class="pacing-value">≤ ${allowedPerDay}/day</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label">Reset in:</span>
+								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours}h</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label">Reset Date:</span>
+								<span class="pacing-value">${this._formatDateTime(data.quota_reset_date_utc)}</span>
+							</div>
+						</div>
+					`;
 				}
 
 				return `
@@ -368,12 +369,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					.header {
 						margin-bottom: 16px;
 					}
-					.title {
-						font-size: 16px;
-						font-weight: 600;
-						margin-bottom: 4px;
-					}
-					.subtitle {
+					.last-updated {
 						font-size: 11px;
 						color: var(--vscode-descriptionForeground);
 						margin-bottom: 8px;
@@ -389,7 +385,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					}
 					.summary-cards {
 						display: grid;
-						grid-template-columns: 1fr 1fr;
+						grid-template-columns: 1fr 1fr 1fr;
 						gap: 8px;
 						margin-bottom: 16px;
 					}
@@ -481,6 +477,30 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						padding: 4px 0;
 						font-style: italic;
 					}
+					.quota-pacing-highlight {
+						background-color: var(--vscode-textCodeBlock-background);
+						border-radius: 4px;
+						padding: 8px;
+						margin-top: 8px;
+					}
+					.pacing-row {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						margin-bottom: 4px;
+					}
+					.pacing-row:last-child {
+						margin-bottom: 0;
+					}
+					.pacing-label {
+						font-size: 11px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.pacing-value {
+						font-size: 13px;
+						font-weight: 700;
+						color: var(--vscode-foreground);
+					}
 					.quota-overage {
 						font-size: 11px;
 						color: var(--vscode-descriptionForeground);
@@ -540,11 +560,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			</head>
 			<body>
 				<div class="header">
-					<div class="title">Copilot Insights</div>
-					<div class="subtitle">Updated ${timeSince}</div>
-				</div>
+				<div class="last-updated">Last fetched: ${timeSince}</div>
+			</div>
 
-				${isStale ? `<div class="warning-banner">⚠️ Data may be stale (updated over 1 hour ago)</div>` : ''}
+			${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
+					${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
+				</div>
 
 				${summaryCardsHtml}
 
@@ -564,23 +585,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					</div>
 				</div>
 
-
-				${debugHtml}
-				<div class="section">
-					<h2 class="section-title">Quotas</h2>
-					${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
-				</div>
-
 				${orgsHtml}
-
-				<div class="metadata">
-					<div class="metadata-row">
-						<span class="metadata-label">Reset Date:</span> ${this._formatDateTime(data.quota_reset_date_utc)}
-					</div>
-					<div class="metadata-row">
-						<span class="metadata-label">As of:</span> ${this._formatDateTime(asOfTime)}
-					</div>
-				</div>
 
 				<div class="disclaimer">
 					ℹ️ This view shows plan and quota status. It is not a usage report.

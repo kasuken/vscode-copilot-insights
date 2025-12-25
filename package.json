@@ -36,7 +36,16 @@
         "title": "Copilot Insights: Refresh",
         "icon": "$(refresh)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "vscode-copilot-insights.refresh",
+          "when": "view == copilotInsights.sidebarView",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
