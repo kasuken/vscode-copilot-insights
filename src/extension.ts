@@ -339,7 +339,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 		if (data.organization_list && data.organization_list.length > 0) {
 			orgsHtml = `
 				<div class="section">
-					<h2 class="section-title">Organizations</h2>
+					<h2 class="section-title">Organizations with Copilot Access</h2>
 					<div class="org-list">
 						${data.organization_list.map(org => `
 							<div class="org-item">
@@ -564,11 +564,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			</div>
 
 			${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
-					${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
-				</div>
 
-				${summaryCardsHtml}
+			<div class="section">
+				<h2 class="section-title">Quotas</h2>
+				${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
+			</div>
 
+			${summaryCardsHtml}
+
+			${orgsHtml}
 				<div class="section">
 					<h2 class="section-title">Access Details</h2>
 					<div class="quota-card">
@@ -584,8 +588,6 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						</div>
 					</div>
 				</div>
-
-				${orgsHtml}
 
 				<div class="disclaimer">
 					ℹ️ This view shows plan and quota status. It is not a usage report.
