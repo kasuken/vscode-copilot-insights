@@ -36,8 +36,16 @@ interface CopilotUserData {
 class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'copilotInsights.sidebarView';
 	private _view?: vscode.WebviewView;
+	private _statusBarItem: vscode.StatusBarItem;
 
-	constructor(private readonly _extensionUri: vscode.Uri) {}
+	constructor(private readonly _extensionUri: vscode.Uri) {
+		// Create status bar item
+		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+		this._statusBarItem.command = 'copilotInsights.sidebarView.focus';
+		this._statusBarItem.text = "$(loading~spin) Copilot";
+		this._statusBarItem.tooltip = "Loading Copilot insights...";
+		this._statusBarItem.show();
+	}
 
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
@@ -89,6 +97,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
 			const data = await response.json() as CopilotUserData;
 			this._updateWithData(data);
+			this._updateStatusBar(data);
 
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -106,6 +115,52 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 	private _updateWithError(error: string) {
 		if (this._view) {
 			this._view.webview.html = this._getErrorHtml(error);
+		}
+		this._statusBarItem.text = "$(error) Copilot";
+		this._statusBarItem.tooltip = `Error: ${error}`;
+	}
+
+	private _updateStatusBar(data: CopilotUserData) {
+		// Find premium interactions quota
+		const quotaSnapshotsArray = data.quota_snapshots 
+			? Object.values(data.quota_snapshots)
+			: [];
+		
+		const premiumQuota = quotaSnapshotsArray.find(q => q.quota_id === 'premium_interactions');
+		
+		if (premiumQuota && !premiumQuota.unlimited) {
+			const percentRemaining = Math.round((premiumQuota.remaining / premiumQuota.entitlement) * 100);
+			let icon = '$(pulse)';
+			
+			// Choose icon based on remaining percentage
+			if (percentRemaining < 20) {
+				icon = '$(warning)';
+			} else if (percentRemaining < 50) {
+				icon = '$(info)';
+			}
+			
+			this._statusBarItem.text = `${icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
+			
+			// Calculate days until reset
+			const latestSnapshot = quotaSnapshotsArray[0];
+			const asOfTime = latestSnapshot?.timestamp_utc || new Date().toISOString();
+			const timeUntilReset = this._calculateDaysUntilReset(data.quota_reset_date_utc, asOfTime);
+			
+			this._statusBarItem.tooltip = new vscode.MarkdownString(
+				`**GitHub Copilot Premium Interactions**\n\n` +
+				`• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
+				`• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
+				`• Plan: **${data.copilot_plan}**\n\n` +
+				`_Click to view full details_`
+			);
+		} else {
+			this._statusBarItem.text = "$(check) Copilot";
+			this._statusBarItem.tooltip = new vscode.MarkdownString(
+				`**GitHub Copilot**\n\n` +
+				`• Plan: **${data.copilot_plan}**\n` +
+				`• Premium Interactions: **Unlimited**\n\n` +
+				`_Click to view full details_`
+			);
 		}
 	}
 
@@ -281,6 +336,19 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				let pacingHtml = '';
 				if (timeUntilReset.totalDays > 0) {
 					const allowedPerDay = Math.floor(quota.remaining / timeUntilReset.totalDays);
+					
+					// Calculate weeks remaining until reset (minimum 1 week)
+					const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
+					const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
+					
+					// Calculate working days (Mon-Fri) until reset
+					const workingDays = Math.floor(timeUntilReset.totalDays * (5/7)); // Approximate working days
+					const allowedPerWorkDay = workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
+					
+					// Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
+					const totalWorkingHours = workingDays * 8;
+					const allowedPerHour = totalWorkingHours > 0 ? Math.floor(quota.remaining / totalWorkingHours) : 0;
+					
 					pacingHtml = `
 						<div class="quota-pacing-highlight">
 							<div class="pacing-row">
@@ -294,6 +362,19 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div class="pacing-row">
 								<span class="pacing-label">Reset Date:</span>
 								<span class="pacing-value">${this._formatDateTime(data.quota_reset_date_utc)}</span>
+							</div>
+						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div class="pacing-row">
+								<span class="pacing-label">Weekly average:</span>
+								<span class="pacing-value">≤ ${allowedPerWeek}/week</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label">Work day average:</span>
+								<span class="pacing-value">≤ ${allowedPerWorkDay}/day (Mon-Fri)</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label">Work hour average:</span>
+								<span class="pacing-value">≤ ${allowedPerHour}/hour (9-5)</span>
 							</div>
 						</div>
 					`;
@@ -559,17 +640,17 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</style>
 			</head>
 			<body>
+				${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
 
-			${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
+				<div class="section">
+					<h2 class="section-title">Quotas</h2>
+					${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
+				</div>
 
-			<div class="section">
-				<h2 class="section-title">Quotas</h2>
-				${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
-			</div>
+				${summaryCardsHtml}
 
-			${summaryCardsHtml}
+				${orgsHtml}
 
-			${orgsHtml}
 				<div class="section">
 					<h2 class="section-title">Access Details</h2>
 					<div class="quota-card">
