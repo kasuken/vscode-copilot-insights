@@ -559,9 +559,6 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</style>
 			</head>
 			<body>
-				<div class="header">
-				<div class="last-updated">Last fetched: ${timeSince}</div>
-			</div>
 
 			${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
 
@@ -591,6 +588,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
 				<div class="disclaimer">
 					ℹ️ This view shows plan and quota status. It is not a usage report.
+				</div>
+
+				<div class="last-updated" style="text-align: center; margin-top: 8px;">
+					Last fetched: ${timeSince}
 				</div>
 			</body>
 			</html>`;
