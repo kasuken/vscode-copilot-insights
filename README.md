@@ -53,7 +53,8 @@ Open the **Copilot Insights** icon in the Activity Bar.
 	- **To last until reset**: ≤ X/day
 	- **Reset in**: Xd Xh
 	- **Reset Date** (UTC)
-	- **Weekly average** + **workday/workhour averages**
+	- **Projections premium requests before the reset**:
+		- **Weekly average** + **workday/workhour averages**
 
 **Plan Details**
 - Plan (e.g. Enterprise)

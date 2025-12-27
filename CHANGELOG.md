@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.0.1]
+
+### Added
+- Section title "Projections premium requests before the reset" to better organize pacing guidance in quota cards.
+
 ## [1.0.0]
 
 ### Added

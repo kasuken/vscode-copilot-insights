@@ -364,6 +364,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 								<span class="pacing-value">${this._formatDateTime(data.quota_reset_date_utc)}</span>
 							</div>
 						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
+								Projections premium requests before the reset
+							</div>
 							<div class="pacing-row">
 								<span class="pacing-label">Weekly average:</span>
 								<span class="pacing-value">≤ ${allowedPerWeek}/week</span>
