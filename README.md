@@ -8,6 +8,18 @@
 	Understand your GitHub Copilot plan and quotas at a glance — in the VS Code sidebar and status bar.
 </p>
 
+<p align="center">
+	<a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
+		<img src="https://img.shields.io/visual-studio-marketplace/v/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code&label=VS%20Marketplace" alt="Visual Studio Marketplace Version" />
+	</a>
+	<a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
+		<img src="https://img.shields.io/visual-studio-marketplace/d/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code" alt="Downloads" />
+	</a>
+	<a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
+		<img src="https://img.shields.io/visual-studio-marketplace/r/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code" alt="Rating" />
+	</a>
+</p>
+
 ---
 
 ## What it does
