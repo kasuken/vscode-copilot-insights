@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.2.0]
+
+### Added
+- One-time warning when Premium requests exceed 85% of the monthly quota, with a quick link to open the Insights view.
+
 ## [1.0.1]
 
 ### Added

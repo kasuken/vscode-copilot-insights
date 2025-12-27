@@ -28,6 +28,7 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 
 - Sidebar view with quota cards and pacing guidance
 - Status bar indicator for Premium Interactions (remaining / total + %)
+- One-time warning when Premium usage exceeds 85% of your monthly quota
 - Auto-refresh when the view becomes visible
 - Manual refresh button in the view title bar
 
@@ -46,6 +47,7 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
     - Compact view of Premium Interactions remaining/total + percentage
     - Severity icons based on remaining percentage
     - Tooltip with reset information
+		- Shows a warning notification once per reset cycle when usage passes 85%
 
 ## Screenshots
 

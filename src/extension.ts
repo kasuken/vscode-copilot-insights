@@ -37,8 +37,13 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'copilotInsights.sidebarView';
 	private _view?: vscode.WebviewView;
 	private _statusBarItem: vscode.StatusBarItem;
+	private readonly _premiumUsageAlertThreshold = 85;
+	private readonly _premiumUsageAlertKey = 'copilotInsights.premiumUsageAlert.resetDate';
 
-	constructor(private readonly _extensionUri: vscode.Uri) {
+	constructor(
+		private readonly _extensionUri: vscode.Uri,
+		private readonly _context: vscode.ExtensionContext
+	) {
 		// Create status bar item
 		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this._statusBarItem.command = 'copilotInsights.sidebarView.focus';
@@ -130,6 +135,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 		
 		if (premiumQuota && !premiumQuota.unlimited) {
 			const percentRemaining = Math.round((premiumQuota.remaining / premiumQuota.entitlement) * 100);
+			const used = premiumQuota.entitlement - premiumQuota.remaining;
+			const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
 			let icon = '$(pulse)';
 			
 			// Choose icon based on remaining percentage
@@ -140,6 +147,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			}
 			
 			this._statusBarItem.text = `${icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
+			this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
 			
 			// Calculate days until reset
 			const latestSnapshot = quotaSnapshotsArray[0];
@@ -161,6 +169,29 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				`• Premium Interactions: **Unlimited**\n\n` +
 				`_Click to view full details_`
 			);
+		}
+	}
+
+	private _maybeNotifyPremiumUsage(data: CopilotUserData, premiumQuota: QuotaSnapshot, percentUsed: number) {
+		if (!premiumQuota?.entitlement || premiumQuota.unlimited) {
+			return;
+		}
+
+		const resetDate = data.quota_reset_date_utc || '';
+		const lastNotifiedReset = this._context.globalState.get<string>(this._premiumUsageAlertKey);
+
+		if (percentUsed >= this._premiumUsageAlertThreshold && lastNotifiedReset !== resetDate) {
+			vscode.window.showWarningMessage(
+				`Copilot Premium requests are at ${percentUsed}% of your monthly quota.`,
+				'Open details'
+			).then(selection => {
+				if (selection === 'Open details') {
+					vscode.commands.executeCommand('copilotInsights.sidebarView.focus');
+				}
+			});
+			this._context.globalState.update(this._premiumUsageAlertKey, resetDate);
+		} else if (lastNotifiedReset && lastNotifiedReset !== resetDate && percentUsed < this._premiumUsageAlertThreshold) {
+			this._context.globalState.update(this._premiumUsageAlertKey, undefined);
 		}
 	}
 
@@ -687,7 +718,7 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Copilot Insights extension is now active!');
 
 	// Register the sidebar webview provider
-	const provider = new CopilotInsightsViewProvider(context.extensionUri);
+	const provider = new CopilotInsightsViewProvider(context.extensionUri, context);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(CopilotInsightsViewProvider.viewType, provider)
 	);
