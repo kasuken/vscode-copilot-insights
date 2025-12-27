@@ -3,6 +3,14 @@
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
   "version": "1.0.0",
+  "publisher": "emanuelebartolesi",
+    "icon": "img/logo.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kasuken/vscode-copilot-insights.git"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/kasuken/vscode-copilot-insights",
   "engines": {
     "vscode": "^1.107.0"
   },

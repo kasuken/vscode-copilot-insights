@@ -24,6 +24,16 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 ---
 
 ## Features
+- **Sidebar (Copilot Insights)**:
+    - Shows your Copilot plan details
+    - Lists organizations where you have Copilot access
+    - Displays quota cards with progress bars and pacing guidance
+    - Auto-refreshes when the view becomes visible
+    - Manual refresh button in the title bar
+  - **Status bar indicator**:
+    - Compact view of Premium Interactions remaining/total + percentage
+    - Severity icons based on remaining percentage
+    - Tooltip with reset information
 
 ## Screenshots
 
@@ -107,7 +117,7 @@ All displayed pacing values use `floor(...)` (rounded down) so they remain conse
 
 To avoid misleading weekly values when less than one week remains:
 
-- `weeksRemaining = max(1, daysUntilReset / 7)`
+- `weeksRemaining = max(1, floor(daysUntilReset / 7))`
 - `allowedPerWeek = floor(remaining / weeksRemaining)`
 
 ### Workday / workhour averages (Mon–Fri, 9–5)
