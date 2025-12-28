@@ -99,8 +99,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			if (!response.ok) {
 				throw new Error(`GitHub API returned ${response.status}: ${response.statusText}`);
 			}
-
-			const data = await response.json() as CopilotUserData;
+			
+			const apiData = await response.json();
+			// convert copilot_plan to always start with a capital letter everywhere
+			const data: CopilotUserData = {
+				...apiData,
+				copilot_plan: apiData.copilot_plan
+					? apiData.copilot_plan.charAt(0).toUpperCase() + apiData.copilot_plan.slice(1)
+					: ''
+			};
 			this._updateWithData(data);
 			this._updateStatusBar(data);
 
