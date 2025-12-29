@@ -41,12 +41,13 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
     - Shows your Copilot plan details
     - Lists organizations where you have Copilot access
     - Displays quota cards with progress bars and pacing guidance
+    - Status badges (🟢 Healthy, 🟡 Watch, 🔴 Risk) based on quota percentage
     - Auto-refreshes when the view becomes visible
     - Manual refresh button in the title bar
   - **Status bar indicator**:
     - Compact view of Premium Interactions remaining/total + percentage
-    - Severity icons based on remaining percentage
-    - Tooltip with reset information
+    - Severity icons and status badges based on remaining percentage
+    - Tooltip with status label and reset information
 		- Shows a warning notification once per reset cycle when usage passes 85%
 
 ## Screenshots
@@ -63,6 +64,7 @@ Open the **Copilot Insights** icon in the Activity Bar.
 - Shows each quota (e.g. Premium Interactions, Chat, Completions)
 - Handles **Unlimited** quotas correctly
 - Progress bar + remaining/used/total for limited quotas
+- Status indicator: 🟢 Healthy (>50%), 🟡 Watch (20-50%), 🔴 Risk (<20%)
 - Pacing helpers:
 	- **To last until reset**: ≤ X/day
 	- **Reset in**: Xd Xh

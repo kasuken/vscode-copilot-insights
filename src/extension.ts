@@ -176,16 +176,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       );
       const used = premiumQuota.entitlement - premiumQuota.remaining;
       const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
-      let icon = "$(pulse)";
+      const statusBadge = this._getStatusBadge(percentRemaining);
 
-      // Choose icon based on remaining percentage
-      if (percentRemaining < 20) {
-        icon = "$(warning)";
-      } else if (percentRemaining < 50) {
-        icon = "$(info)";
-      }
-
-      this._statusBarItem.text = `${icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
+      this._statusBarItem.text = `${statusBadge.icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
       this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
 
       // Calculate days until reset
@@ -199,6 +192,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
       this._statusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot Premium Interactions**\n\n` +
+          `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
           `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
           `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
           `• Plan: **${data.copilot_plan}**\n\n` +
@@ -264,6 +258,36 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     const days = Math.floor(diffDays);
     const hours = Math.floor((diffDays - days) * 24);
     return { days, hours, totalDays: diffDays };
+  }
+
+  private _getStatusBadge(percentRemaining: number): {
+    emoji: string;
+    icon: string;
+    label: string;
+    color: string;
+  } {
+    if (percentRemaining > 50) {
+      return {
+        emoji: "🟢",
+        icon: "$(pass)",
+        label: "Healthy",
+        color: "var(--vscode-charts-green)",
+      };
+    } else if (percentRemaining >= 20) {
+      return {
+        emoji: "🟡",
+        icon: "$(warning)",
+        label: "Watch",
+        color: "var(--vscode-charts-yellow)",
+      };
+    } else {
+      return {
+        emoji: "🔴",
+        icon: "$(error)",
+        label: "Risk",
+        color: "var(--vscode-charts-red)",
+      };
+    }
   }
 
   private _calculateTimeSince(timestamp: string): string {
@@ -435,6 +459,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           const percentRemaining = Math.round(
             (quota.remaining / quota.entitlement) * 100
           );
+          const statusBadge = this._getStatusBadge(percentRemaining);
 
           // Calculate pacing
           let pacingHtml = "";
@@ -505,6 +530,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						</div>
 						<div class="progress-bar">
 							<div class="progress-fill" style="width: ${percentRemaining}%"></div>
+						</div>
+						<div class="quota-status">
+							<span class="stat-label">Status:</span>
+							<span class="stat-value" style="color: ${statusBadge.color};">${statusBadge.emoji} ${statusBadge.label}</span>
 						</div>
 						<div class="quota-stats">
 							<div class="stat">
@@ -664,6 +693,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						background-color: var(--vscode-progressBar-background);
 						background: linear-gradient(90deg, var(--vscode-charts-blue) 0%, var(--vscode-charts-green) 100%);
 						transition: width 0.3s ease;
+					}
+					.quota-status {
+						display: flex;
+						flex-direction: column;
+						margin-bottom: 8px;
+						font-size: 12px;
 					}
 					.quota-stats {
 						display: flex;

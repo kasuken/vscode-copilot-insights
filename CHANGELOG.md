@@ -1,5 +1,14 @@
 # Change Log
 
+## [1.4.0]
+
+### Added
+- Status badges for quota health visualization:
+  - 🟢 Healthy (>50% remaining)
+  - 🟡 Watch (20-50% remaining)
+  - 🔴 Risk (<20% remaining)
+- Status indicator now appears in the status bar tooltip and quota cards in the sidebar
+
 ## [1.3.1]
 
 ### Changed
