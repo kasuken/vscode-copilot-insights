@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.3.1]
+
+### Changed
+- Copilot plan names are normalized to start with an uppercase letter across the UI.
+
+### Fixed
+- Premium usage warning resets correctly when a new billing cycle starts, preventing stale alerts.
+
 ## [1.2.0]
 
 ### Added

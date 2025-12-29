@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "1.2.0",
+  "version": "1.3.1",
   "publisher": "emanuelebartolesi",
     "icon": "img/logo.png",
   "repository": {
@@ -18,8 +18,15 @@
     "Other"
   ],
   "keywords": [
-    "copilot",
-    ""
+    "github copilot",
+    "copilot insights",
+    "copilot metrics",
+    "copilot quota",
+    "copilot limits",
+    "ai pair programming",
+    "developer analytics",
+    "usage tracking",
+    "productivity"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
