@@ -70,6 +70,21 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this._getLoadingHtml();
 
+    // Handle messages from the webview
+    webviewView.webview.onDidReceiveMessage(async (message) => {
+      switch (message.command) {
+        case "copyToClipboard":
+          if (message.data) {
+            const markdown = this._generateMarkdownSummary(message.data);
+            await vscode.env.clipboard.writeText(markdown);
+            vscode.window.showInformationMessage(
+              "Copilot Insights summary copied to clipboard"
+            );
+          }
+          break;
+      }
+    });
+
     // Load Copilot data when view becomes visible
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
@@ -288,6 +303,92 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         color: "var(--vscode-charts-red)",
       };
     }
+  }
+
+  private _generateMarkdownSummary(data: CopilotUserData): string {
+    const quotaSnapshotsArray = data.quota_snapshots
+      ? Object.values(data.quota_snapshots)
+      : [];
+
+    const latestSnapshot =
+      quotaSnapshotsArray.length > 0 ? quotaSnapshotsArray[0] : null;
+    const asOfTime = latestSnapshot?.timestamp_utc || new Date().toISOString();
+    const timeUntilReset = this._calculateDaysUntilReset(
+      data.quota_reset_date_utc,
+      asOfTime
+    );
+
+    let markdown = `# GitHub Copilot Insights\n\n`;
+    markdown += `**Generated:** ${new Date().toLocaleString()}\n\n`;
+
+    // Plan Details
+    markdown += `## Plan Details\n\n`;
+    markdown += `- **Plan:** ${data.copilot_plan || "Unknown"}\n`;
+    markdown += `- **Chat:** ${data.chat_enabled ? "Enabled" : "Disabled"}\n`;
+    markdown += `- **Access/SKU:** ${data.access_type_sku || "Unknown"}\n`;
+    markdown += `- **Assigned:** ${this._formatDate(data.assigned_date)}\n\n`;
+
+    // Quotas
+    if (quotaSnapshotsArray.length > 0) {
+      markdown += `## Quotas\n\n`;
+      quotaSnapshotsArray.forEach((quota) => {
+        const quotaName = quota.quota_id
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (l) => l.toUpperCase());
+
+        markdown += `### ${quotaName}\n\n`;
+
+        if (quota.unlimited) {
+          markdown += `- **Status:** Unlimited ∞\n\n`;
+        } else {
+          const percentRemaining = Math.round(
+            (quota.remaining / quota.entitlement) * 100
+          );
+          const used = quota.entitlement - quota.remaining;
+          const statusBadge = this._getStatusBadge(percentRemaining);
+
+          markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (${percentRemaining}% remaining)\n`;
+          markdown += `- **Remaining:** ${quota.remaining}\n`;
+          markdown += `- **Used:** ${used}\n`;
+          markdown += `- **Total:** ${quota.entitlement}\n`;
+
+          if (timeUntilReset.totalDays > 0) {
+            const allowedPerDay = Math.floor(
+              quota.remaining / timeUntilReset.totalDays
+            );
+            markdown += `- **To last until reset:** ≤ ${allowedPerDay}/day\n`;
+            markdown += `- **Reset in:** ${timeUntilReset.days}d ${timeUntilReset.hours}h\n`;
+            markdown += `- **Reset Date:** ${this._formatDateTime(
+              data.quota_reset_date_utc
+            )}\n`;
+          }
+
+          if (quota.overage_permitted) {
+            markdown += `- **Overage:** Permitted`;
+            if (quota.overage_count > 0) {
+              markdown += ` (${quota.overage_count} used)`;
+            }
+            markdown += `\n`;
+          }
+
+          markdown += `\n`;
+        }
+      });
+    }
+
+    // Organizations
+    if (data.organization_list && data.organization_list.length > 0) {
+      markdown += `## Organizations with Copilot Access\n\n`;
+      data.organization_list.forEach((org) => {
+        markdown += `- **${org.name || org.login}** (@${org.login})\n`;
+      });
+      markdown += `\n`;
+    }
+
+    markdown += `---\n`;
+    markdown += `*Data fetched from GitHub Copilot API*\n`;
+
+    return markdown;
   }
 
   private _calculateTimeSince(timestamp: string): string {
@@ -597,6 +698,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			<head>
 				<meta charset="UTF-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://microsoft.github.io; font-src https://microsoft.github.io; script-src 'unsafe-inline';">
+				<link rel="stylesheet" href="https://microsoft.github.io/vscode-codicons/dist/codicon.css">
 				<title>Copilot Insights</title>
 				<style>
 					body {
@@ -802,6 +905,32 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						background-color: var(--vscode-editor-background);
 						border-radius: 4px;
 					}
+					.copy-button {
+						width: 100%;
+						margin: 12px 0;
+						padding: 8px 12px;
+						background-color: var(--vscode-button-background);
+						color: var(--vscode-button-foreground);
+						border: none;
+						border-radius: 4px;
+						cursor: pointer;
+						font-size: 12px;
+						font-family: var(--vscode-font-family);
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						gap: 6px;
+					}
+					.copy-button:hover {
+						background-color: var(--vscode-button-hoverBackground);
+					}
+					.copy-button:active {
+						background-color: var(--vscode-button-background);
+						opacity: 0.8;
+					}
+					.copy-button .codicon {
+						font-size: 14px;
+					}
 				</style>
 			</head>
 			<body>
@@ -843,9 +972,26 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					ℹ️ This view shows plan and quota status. It is not a usage report.
 				</div>
 
+				<button id="copyButton" class="copy-button">
+					<span class="codicon codicon-clippy"></span>
+					Copy Summary to Clipboard
+				</button>
+
 				<div class="last-updated" style="text-align: center; margin-top: 8px;">
 					Last fetched: ${timeSince}
 				</div>
+
+				<script>
+					const vscode = acquireVsCodeApi();
+					const data = ${JSON.stringify(data)};
+					
+					document.getElementById('copyButton').addEventListener('click', () => {
+						vscode.postMessage({
+							command: 'copyToClipboard',
+							data: data
+						});
+					});
+				</script>
 			</body>
 			</html>`;
   }

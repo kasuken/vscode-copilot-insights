@@ -42,6 +42,7 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
     - Lists organizations where you have Copilot access
     - Displays quota cards with progress bars and pacing guidance
     - Status badges (🟢 Healthy, 🟡 Watch, 🔴 Risk) based on quota percentage
+    - **Copy Summary to Clipboard** button for exporting insights as Markdown
     - Auto-refreshes when the view becomes visible
     - Manual refresh button in the title bar
   - **Status bar indicator**:
@@ -95,6 +96,23 @@ A compact status bar item shows your Premium Interactions remaining at a glance,
 - `Copilot: 975/1000 (98%)`
 
 It also adapts the icon based on remaining percentage and includes a tooltip with reset information.
+
+---
+
+## Export & Sharing
+
+Use the **"Copy Summary to Clipboard"** button at the bottom of the Insights view to export your Copilot information as formatted Markdown. This makes it easy to:
+
+- Share quota status with your team
+- Document Copilot usage in reports
+- Track quota trends over time
+- Include in meeting notes or documentation
+
+The exported Markdown includes:
+- Plan details (plan type, chat status, access/SKU)
+- All quota information with status badges
+- Pacing guidance and reset information
+- Organization list
 
 ---
 

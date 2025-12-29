@@ -1,5 +1,12 @@
 # Change Log
 
+## [1.5.0]
+
+### Added
+- "Copy Summary to Clipboard" button in the sidebar view
+- Export Copilot insights as formatted Markdown with all plan details, quotas, status badges, and organization information
+- One-click copy to clipboard functionality for easy sharing and documentation
+
 ## [1.4.0]
 
 ### Added
