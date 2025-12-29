@@ -1,255 +1,313 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 interface Organization {
-	login: string;
-	name: string;
+  login: string;
+  name: string;
 }
 
 interface QuotaSnapshot {
-	quota_id: string;
-	timestamp_utc: string;
-	entitlement: number;
-	quota_remaining: number;
-	remaining: number;
-	percent_remaining: number;
-	unlimited: boolean;
-	overage_permitted: boolean;
-	overage_count: number;
+  quota_id: string;
+  timestamp_utc: string;
+  entitlement: number;
+  quota_remaining: number;
+  remaining: number;
+  percent_remaining: number;
+  unlimited: boolean;
+  overage_permitted: boolean;
+  overage_count: number;
 }
 
 interface CopilotUserData {
-	copilot_plan: string;
-	chat_enabled: boolean;
-	access_type_sku: string;
-	assigned_date: string;
-	organization_list: Organization[];
-	quota_snapshots: {
-		[key: string]: QuotaSnapshot;
-	};
-	quota_reset_date_utc: string;
-	quota_reset_date: string;
-	tracking_id?: string;
+  copilot_plan: string;
+  chat_enabled: boolean;
+  access_type_sku: string;
+  assigned_date: string;
+  organization_list: Organization[];
+  quota_snapshots: {
+    [key: string]: QuotaSnapshot;
+  };
+  quota_reset_date_utc: string;
+  quota_reset_date: string;
+  tracking_id?: string;
 }
 
 class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
-	public static readonly viewType = 'copilotInsights.sidebarView';
-	private _view?: vscode.WebviewView;
-	private _statusBarItem: vscode.StatusBarItem;
-	private readonly _premiumUsageAlertThreshold = 85;
-	private readonly _premiumUsageAlertKey = 'copilotInsights.premiumUsageAlert.resetDate';
+  public static readonly viewType = "copilotInsights.sidebarView";
+  private _view?: vscode.WebviewView;
+  private _statusBarItem: vscode.StatusBarItem;
+  private readonly _premiumUsageAlertThreshold = 85;
+  private readonly _premiumUsageAlertKey =
+    "copilotInsights.premiumUsageAlert.resetDate";
 
-	constructor(
-		private readonly _extensionUri: vscode.Uri,
-		private readonly _context: vscode.ExtensionContext
-	) {
-		// Create status bar item
-		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-		this._statusBarItem.command = 'copilotInsights.sidebarView.focus';
-		this._statusBarItem.text = "$(loading~spin) Copilot";
-		this._statusBarItem.tooltip = "Loading Copilot insights...";
-		this._statusBarItem.show();
-	}
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    private readonly _context: vscode.ExtensionContext
+  ) {
+    // Create status bar item
+    this._statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Right,
+      100
+    );
+    this._statusBarItem.command = "copilotInsights.sidebarView.focus";
+    this._statusBarItem.text = "$(loading~spin) Copilot";
+    this._statusBarItem.tooltip = "Loading Copilot insights...";
+    this._statusBarItem.show();
+  }
 
-	public resolveWebviewView(
-		webviewView: vscode.WebviewView,
-		context: vscode.WebviewViewResolveContext,
-		_token: vscode.CancellationToken
-	) {
-		this._view = webviewView;
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    this._view = webviewView;
 
-		webviewView.webview.options = {
-			enableScripts: true,
-			localResourceRoots: [this._extensionUri]
-		};
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
 
-		webviewView.webview.html = this._getLoadingHtml();
+    webviewView.webview.html = this._getLoadingHtml();
 
-		// Load Copilot data when view becomes visible
-		webviewView.onDidChangeVisibility(() => {
-			if (webviewView.visible) {
-				this.loadCopilotData();
-			}
-		});
+    // Load Copilot data when view becomes visible
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.loadCopilotData();
+      }
+    });
 
-		// Load initial data
-		this.loadCopilotData();
-	}
+    // Load initial data
+    this.loadCopilotData();
+  }
 
-	public async loadCopilotData() {
-		try {
-			// Get GitHub authentication session
-			const session = await vscode.authentication.getSession('github', ['user:email'], { createIfNone: true });
-			
-			if (!session) {
-				this._updateWithError('Failed to authenticate with GitHub');
-				return;
-			}
+  public async loadCopilotData() {
+    try {
+      // Get GitHub authentication session
+      const session = await vscode.authentication.getSession(
+        "github",
+        ["user:email"],
+        { createIfNone: true }
+      );
 
-			// Call the GitHub Copilot endpoint
-			const response = await fetch('https://api.github.com/copilot_internal/user', {
-				headers: {
-					'Authorization': `Bearer ${session.accessToken}`,
-					'Accept': 'application/json',
-					'User-Agent': 'VSCode-Copilot-Insights'
-				}
-			});
+      if (!session) {
+        this._updateWithError("Failed to authenticate with GitHub");
+        return;
+      }
 
-			if (!response.ok) {
-				throw new Error(`GitHub API returned ${response.status}: ${response.statusText}`);
-			}
-			
-			const apiData = await response.json();
-			// convert copilot_plan to always start with a capital letter everywhere
-			const data: CopilotUserData = {
-				...apiData,
-				copilot_plan: apiData.copilot_plan
-					? apiData.copilot_plan.charAt(0).toUpperCase() + apiData.copilot_plan.slice(1)
-					: ''
-			};
-			this._updateWithData(data);
-			this._updateStatusBar(data);
+      // Call the GitHub Copilot endpoint
+      const response = await fetch(
+        "https://api.github.com/copilot_internal/user",
+        {
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+            Accept: "application/json",
+            "User-Agent": "VSCode-Copilot-Insights",
+          },
+        }
+      );
 
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-			this._updateWithError(errorMessage);
-			vscode.window.showErrorMessage(`Failed to load Copilot data: ${errorMessage}`);
-		}
-	}
+      if (!response.ok) {
+        throw new Error(
+          `GitHub API returned ${response.status}: ${response.statusText}`
+        );
+      }
 
-	private _updateWithData(data: CopilotUserData) {
-		if (this._view) {
-			this._view.webview.html = this._getHtmlForWebview(data);
-		}
-	}
+      const apiData = (await response.json()) as Partial<CopilotUserData>;
+      const data: CopilotUserData = {
+        ...apiData,
+        copilot_plan: this._normalizeCopilotPlan(apiData.copilot_plan),
+        chat_enabled: Boolean(apiData.chat_enabled),
+        access_type_sku: apiData.access_type_sku ?? "",
+        assigned_date: apiData.assigned_date ?? "",
+        organization_list: apiData.organization_list ?? [],
+        quota_snapshots: apiData.quota_snapshots ?? {},
+        quota_reset_date_utc: apiData.quota_reset_date_utc ?? "",
+        quota_reset_date: apiData.quota_reset_date ?? "",
+        tracking_id: apiData.tracking_id,
+      };
+      this._updateWithData(data);
+      this._updateStatusBar(data);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      this._updateWithError(errorMessage);
+      vscode.window.showErrorMessage(
+        `Failed to load Copilot data: ${errorMessage}`
+      );
+    }
+  }
 
-	private _updateWithError(error: string) {
-		if (this._view) {
-			this._view.webview.html = this._getErrorHtml(error);
-		}
-		this._statusBarItem.text = "$(error) Copilot";
-		this._statusBarItem.tooltip = `Error: ${error}`;
-	}
+  private _normalizeCopilotPlan(plan: unknown): string {
+    const value = typeof plan === "string" ? plan.trim() : "";
+    if (!value) {
+      return "";
+    }
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
 
-	private _updateStatusBar(data: CopilotUserData) {
-		// Find premium interactions quota
-		const quotaSnapshotsArray = data.quota_snapshots 
-			? Object.values(data.quota_snapshots)
-			: [];
-		
-		const premiumQuota = quotaSnapshotsArray.find(q => q.quota_id === 'premium_interactions');
-		
-		if (premiumQuota && !premiumQuota.unlimited) {
-			const percentRemaining = Math.round((premiumQuota.remaining / premiumQuota.entitlement) * 100);
-			const used = premiumQuota.entitlement - premiumQuota.remaining;
-			const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
-			let icon = '$(pulse)';
-			
-			// Choose icon based on remaining percentage
-			if (percentRemaining < 20) {
-				icon = '$(warning)';
-			} else if (percentRemaining < 50) {
-				icon = '$(info)';
-			}
-			
-			this._statusBarItem.text = `${icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
-			this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
-			
-			// Calculate days until reset
-			const latestSnapshot = quotaSnapshotsArray[0];
-			const asOfTime = latestSnapshot?.timestamp_utc || new Date().toISOString();
-			const timeUntilReset = this._calculateDaysUntilReset(data.quota_reset_date_utc, asOfTime);
-			
-			this._statusBarItem.tooltip = new vscode.MarkdownString(
-				`**GitHub Copilot Premium Interactions**\n\n` +
-				`• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
-				`• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
-				`• Plan: **${data.copilot_plan}**\n\n` +
-				`_Click to view full details_`
-			);
-		} else {
-			this._statusBarItem.text = "$(check) Copilot";
-			this._statusBarItem.tooltip = new vscode.MarkdownString(
-				`**GitHub Copilot**\n\n` +
-				`• Plan: **${data.copilot_plan}**\n` +
-				`• Premium Interactions: **Unlimited**\n\n` +
-				`_Click to view full details_`
-			);
-		}
-	}
+  private _updateWithData(data: CopilotUserData) {
+    if (this._view) {
+      this._view.webview.html = this._getHtmlForWebview(data);
+    }
+  }
 
-	private _maybeNotifyPremiumUsage(data: CopilotUserData, premiumQuota: QuotaSnapshot, percentUsed: number) {
-		if (!premiumQuota?.entitlement || premiumQuota.unlimited) {
-			return;
-		}
+  private _updateWithError(error: string) {
+    if (this._view) {
+      this._view.webview.html = this._getErrorHtml(error);
+    }
+    this._statusBarItem.text = "$(error) Copilot";
+    this._statusBarItem.tooltip = `Error: ${error}`;
+  }
 
-		const resetDate = data.quota_reset_date_utc || '';
-		const lastNotifiedReset = this._context.globalState.get<string>(this._premiumUsageAlertKey);
+  private _updateStatusBar(data: CopilotUserData) {
+    // Find premium interactions quota
+    const quotaSnapshotsArray = data.quota_snapshots
+      ? Object.values(data.quota_snapshots)
+      : [];
 
-		if (percentUsed >= this._premiumUsageAlertThreshold && lastNotifiedReset !== resetDate) {
-			vscode.window.showWarningMessage(
-				`Copilot Premium requests are at ${percentUsed}% of your monthly quota.`,
-				'Open details'
-			).then(selection => {
-				if (selection === 'Open details') {
-					vscode.commands.executeCommand('copilotInsights.sidebarView.focus');
-				}
-			});
-			this._context.globalState.update(this._premiumUsageAlertKey, resetDate);
-		} else if (lastNotifiedReset && lastNotifiedReset !== resetDate && percentUsed < this._premiumUsageAlertThreshold) {
-			this._context.globalState.update(this._premiumUsageAlertKey, undefined);
-		}
-	}
+    const premiumQuota = quotaSnapshotsArray.find(
+      (q) => q.quota_id === "premium_interactions"
+    );
 
-	private _calculateDaysUntilReset(resetDate: string, asOfTime: string): { days: number; hours: number; totalDays: number } {
-		const reset = new Date(resetDate).getTime();
-		const asOf = new Date(asOfTime).getTime();
-		const diffMs = reset - asOf;
-		const diffDays = diffMs / (1000 * 60 * 60 * 24);
-		const days = Math.floor(diffDays);
-		const hours = Math.floor((diffDays - days) * 24);
-		return { days, hours, totalDays: diffDays };
-	}
+    if (premiumQuota && !premiumQuota.unlimited) {
+      const percentRemaining = Math.round(
+        (premiumQuota.remaining / premiumQuota.entitlement) * 100
+      );
+      const used = premiumQuota.entitlement - premiumQuota.remaining;
+      const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
+      let icon = "$(pulse)";
 
-	private _calculateTimeSince(timestamp: string): string {
-		const now = new Date().getTime();
-		const then = new Date(timestamp).getTime();
-		const diffMs = now - then;
-		const diffMinutes = Math.floor(diffMs / (1000 * 60));
-		const diffHours = Math.floor(diffMinutes / 60);
-		const diffDays = Math.floor(diffHours / 24);
+      // Choose icon based on remaining percentage
+      if (percentRemaining < 20) {
+        icon = "$(warning)";
+      } else if (percentRemaining < 50) {
+        icon = "$(info)";
+      }
 
-		if (diffDays > 0) {
-			return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-		} else if (diffHours > 0) {
-			return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-		} else if (diffMinutes > 0) {
-			return `${diffMinutes} min${diffMinutes > 1 ? 's' : ''} ago`;
-		} else {
-			return 'just now';
-		}
-	}
+      this._statusBarItem.text = `${icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
+      this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
 
-	private _formatDate(dateStr: string): string {
-		const date = new Date(dateStr);
-		return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-	}
+      // Calculate days until reset
+      const latestSnapshot = quotaSnapshotsArray[0];
+      const asOfTime =
+        latestSnapshot?.timestamp_utc || new Date().toISOString();
+      const timeUntilReset = this._calculateDaysUntilReset(
+        data.quota_reset_date_utc,
+        asOfTime
+      );
 
-	private _formatDateTime(dateStr: string): string {
-		const date = new Date(dateStr);
-		return date.toLocaleString('en-US', { 
-			year: 'numeric', 
-			month: 'short', 
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			timeZoneName: 'short'
-		});
-	}
+      this._statusBarItem.tooltip = new vscode.MarkdownString(
+        `**GitHub Copilot Premium Interactions**\n\n` +
+          `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
+          `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
+          `• Plan: **${data.copilot_plan}**\n\n` +
+          `_Click to view full details_`
+      );
+    } else {
+      this._statusBarItem.text = "$(check) Copilot";
+      this._statusBarItem.tooltip = new vscode.MarkdownString(
+        `**GitHub Copilot**\n\n` +
+          `• Plan: **${data.copilot_plan}**\n` +
+          `• Premium Interactions: **Unlimited**\n\n` +
+          `_Click to view full details_`
+      );
+    }
+  }
 
-	private _getLoadingHtml(): string {
-		return `<!DOCTYPE html>
+  private _maybeNotifyPremiumUsage(
+    data: CopilotUserData,
+    premiumQuota: QuotaSnapshot,
+    percentUsed: number
+  ) {
+    if (!premiumQuota?.entitlement || premiumQuota.unlimited) {
+      return;
+    }
+
+    const resetDate = data.quota_reset_date_utc || "";
+    const lastNotifiedReset = this._context.globalState.get<string>(
+      this._premiumUsageAlertKey
+    );
+
+    if (
+      percentUsed >= this._premiumUsageAlertThreshold &&
+      lastNotifiedReset !== resetDate
+    ) {
+      vscode.window
+        .showWarningMessage(
+          `Copilot Premium requests are at ${percentUsed}% of your monthly quota.`,
+          "Open details"
+        )
+        .then((selection) => {
+          if (selection === "Open details") {
+            vscode.commands.executeCommand("copilotInsights.sidebarView.focus");
+          }
+        });
+      this._context.globalState.update(this._premiumUsageAlertKey, resetDate);
+    } else if (
+      lastNotifiedReset &&
+      lastNotifiedReset !== resetDate &&
+      percentUsed < this._premiumUsageAlertThreshold
+    ) {
+      this._context.globalState.update(this._premiumUsageAlertKey, undefined);
+    }
+  }
+
+  private _calculateDaysUntilReset(
+    resetDate: string,
+    asOfTime: string
+  ): { days: number; hours: number; totalDays: number } {
+    const reset = new Date(resetDate).getTime();
+    const asOf = new Date(asOfTime).getTime();
+    const diffMs = reset - asOf;
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    const days = Math.floor(diffDays);
+    const hours = Math.floor((diffDays - days) * 24);
+    return { days, hours, totalDays: diffDays };
+  }
+
+  private _calculateTimeSince(timestamp: string): string {
+    const now = new Date().getTime();
+    const then = new Date(timestamp).getTime();
+    const diffMs = now - then;
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) {
+      return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
+    } else if (diffHours > 0) {
+      return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
+    } else if (diffMinutes > 0) {
+      return `${diffMinutes} min${diffMinutes > 1 ? "s" : ""} ago`;
+    } else {
+      return "just now";
+    }
+  }
+
+  private _formatDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  private _formatDateTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    return date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  }
+
+  private _getLoadingHtml(): string {
+    return `<!DOCTYPE html>
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
@@ -275,10 +333,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				<div class="loading">Loading Copilot data...</div>
 			</body>
 			</html>`;
-	}
+  }
 
-	private _getErrorHtml(error: string): string {
-		return `<!DOCTYPE html>
+  private _getErrorHtml(error: string): string {
+    return `<!DOCTYPE html>
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
@@ -307,56 +365,62 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</div>
 			</body>
 			</html>`;
-	}
+  }
 
-	private _getHtmlForWebview(data: CopilotUserData): string {
-		// Convert quota_snapshots object to array
-		const quotaSnapshotsArray = data.quota_snapshots 
-			? Object.values(data.quota_snapshots)
-			: [];
-		
-		// Get the most recent snapshot for timestamp
-		const latestSnapshot = quotaSnapshotsArray.length > 0 
-			? quotaSnapshotsArray[0] 
-			: null;
-		
-		const asOfTime = latestSnapshot?.timestamp_utc || new Date().toISOString();
-		const timeUntilReset = this._calculateDaysUntilReset(data.quota_reset_date_utc, asOfTime);
-		const timeSince = this._calculateTimeSince(asOfTime);
-		const orgCount = data.organization_list?.length || 0;
-		
-		// Check if data is stale (> 1 hour old)
-		const isStale = new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
+  private _getHtmlForWebview(data: CopilotUserData): string {
+    // Convert quota_snapshots object to array
+    const quotaSnapshotsArray = data.quota_snapshots
+      ? Object.values(data.quota_snapshots)
+      : [];
 
-		// Generate summary cards HTML
-		const summaryCardsHtml = `
+    // Get the most recent snapshot for timestamp
+    const latestSnapshot =
+      quotaSnapshotsArray.length > 0 ? quotaSnapshotsArray[0] : null;
+
+    const asOfTime = latestSnapshot?.timestamp_utc || new Date().toISOString();
+    const timeUntilReset = this._calculateDaysUntilReset(
+      data.quota_reset_date_utc,
+      asOfTime
+    );
+    const timeSince = this._calculateTimeSince(asOfTime);
+    const orgCount = data.organization_list?.length || 0;
+
+    // Check if data is stale (> 1 hour old)
+    const isStale =
+      new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
+
+    // Generate summary cards HTML
+    const summaryCardsHtml = `
 			<div class="section">
 				<h2 class="section-title">Plan Details</h2>
 				<div class="summary-cards">
 					<div class="summary-card">
 						<div class="card-label">Plan</div>
-						<div class="card-value">${data.copilot_plan || 'Unknown'}</div>
+						<div class="card-value">${data.copilot_plan || "Unknown"}</div>
 					</div>
 					<div class="summary-card">
 						<div class="card-label">Chat</div>
-						<div class="card-value">${data.chat_enabled ? 'Enabled' : 'Disabled'}</div>
+						<div class="card-value">${data.chat_enabled ? "Enabled" : "Disabled"}</div>
 					</div>
 					<div class="summary-card">
 						<div class="card-label">Orgs</div>
-						<div class="card-value">${orgCount}${orgCount > 1 ? ' 🔗' : ''}</div>
+						<div class="card-value">${orgCount}${orgCount > 1 ? " 🔗" : ""}</div>
 					</div>
 				</div>
 			</div>
 		`;
 
-		// Generate quotas HTML
-		let quotasHtml = '';
-		if (quotaSnapshotsArray.length > 0) {
-			quotasHtml = quotaSnapshotsArray.map(quota => {
-				const quotaName = quota.quota_id.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-				
-				if (quota.unlimited) {
-					return `
+    // Generate quotas HTML
+    let quotasHtml = "";
+    if (quotaSnapshotsArray.length > 0) {
+      quotasHtml = quotaSnapshotsArray
+        .map((quota) => {
+          const quotaName = quota.quota_id
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (l) => l.toUpperCase());
+
+          if (quota.unlimited) {
+            return `
 						<div class="quota-card">
 							<div class="quota-header">
 								<div class="quota-title">${quotaName}</div>
@@ -364,30 +428,38 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 						</div>
 					`;
-				}
+          }
 
-				const used = quota.entitlement - quota.remaining;
-				const percentUsed = Math.round((used / quota.entitlement) * 100);
-				const percentRemaining = Math.round((quota.remaining / quota.entitlement) * 100);
-				
-				// Calculate pacing
-				let pacingHtml = '';
-				if (timeUntilReset.totalDays > 0) {
-					const allowedPerDay = Math.floor(quota.remaining / timeUntilReset.totalDays);
-					
-					// Calculate weeks remaining until reset (minimum 1 week)
-					const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
-					const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
-					
-					// Calculate working days (Mon-Fri) until reset
-					const workingDays = Math.floor(timeUntilReset.totalDays * (5/7)); // Approximate working days
-					const allowedPerWorkDay = workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
-					
-					// Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
-					const totalWorkingHours = workingDays * 8;
-					const allowedPerHour = totalWorkingHours > 0 ? Math.floor(quota.remaining / totalWorkingHours) : 0;
-					
-					pacingHtml = `
+          const used = quota.entitlement - quota.remaining;
+          const percentUsed = Math.round((used / quota.entitlement) * 100);
+          const percentRemaining = Math.round(
+            (quota.remaining / quota.entitlement) * 100
+          );
+
+          // Calculate pacing
+          let pacingHtml = "";
+          if (timeUntilReset.totalDays > 0) {
+            const allowedPerDay = Math.floor(
+              quota.remaining / timeUntilReset.totalDays
+            );
+
+            // Calculate weeks remaining until reset (minimum 1 week)
+            const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
+            const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
+
+            // Calculate working days (Mon-Fri) until reset
+            const workingDays = Math.floor(timeUntilReset.totalDays * (5 / 7)); // Approximate working days
+            const allowedPerWorkDay =
+              workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
+
+            // Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
+            const totalWorkingHours = workingDays * 8;
+            const allowedPerHour =
+              totalWorkingHours > 0
+                ? Math.floor(quota.remaining / totalWorkingHours)
+                : 0;
+
+            pacingHtml = `
 						<div class="quota-pacing-highlight">
 							<div class="pacing-row">
 								<span class="pacing-label">To last until reset:</span>
@@ -395,11 +467,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label">Reset in:</span>
-								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours}h</span>
+								<span class="pacing-value">${timeUntilReset.days}d ${
+              timeUntilReset.hours
+            }h</span>
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label">Reset Date:</span>
-								<span class="pacing-value">${this._formatDateTime(data.quota_reset_date_utc)}</span>
+								<span class="pacing-value">${this._formatDateTime(
+                  data.quota_reset_date_utc
+                )}</span>
 							</div>
 						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
@@ -419,9 +495,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 						</div>
 					`;
-				}
+          }
 
-				return `
+          return `
 					<div class="quota-card">
 						<div class="quota-header">
 							<div class="quota-title">${quotaName}</div>
@@ -445,36 +521,49 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 						</div>
 						${pacingHtml}
-						${quota.overage_permitted ? `
+						${
+              quota.overage_permitted
+                ? `
 							<div class="quota-overage">
 								<span>Overage permitted</span>
-								${quota.overage_count > 0 ? `<span class="overage-count">${quota.overage_count} used</span>` : ''}
+								${
+                  quota.overage_count > 0
+                    ? `<span class="overage-count">${quota.overage_count} used</span>`
+                    : ""
+                }
 							</div>
-						` : ''}
+						`
+                : ""
+            }
 					</div>
 				`;
-			}).join('');
-		}
+        })
+        .join("");
+    }
 
-		// Generate organizations HTML
-		let orgsHtml = '';
-		if (data.organization_list && data.organization_list.length > 0) {
-			orgsHtml = `
+    // Generate organizations HTML
+    let orgsHtml = "";
+    if (data.organization_list && data.organization_list.length > 0) {
+      orgsHtml = `
 				<div class="section">
 					<h2 class="section-title">Organizations with Copilot Access</h2>
 					<div class="org-list">
-						${data.organization_list.map(org => `
+						${data.organization_list
+              .map(
+                (org) => `
 							<div class="org-item">
 								<div class="org-name">${org.name || org.login}</div>
 								<div class="org-login">@${org.login}</div>
 							</div>
-						`).join('')}
+						`
+              )
+              .join("")}
 					</div>
 				</div>
 			`;
-		}
+    }
 
-		return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
@@ -681,11 +770,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</style>
 			</head>
 			<body>
-				${isStale ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>` : ''}
+				${
+          isStale
+            ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>`
+            : ""
+        }
 
 				<div class="section">
 					<h2 class="section-title">Quotas</h2>
-					${quotasHtml || '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'}
+					${
+            quotasHtml ||
+            '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'
+          }
 				</div>
 
 				${summaryCardsHtml}
@@ -698,7 +794,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						<div class="quota-stats">
 							<div class="stat">
 								<span class="stat-label">SKU/Access</span>
-								<span class="stat-value">${data.access_type_sku || 'Unknown'}</span>
+								<span class="stat-value">${data.access_type_sku || "Unknown"}</span>
 							</div>
 							<div class="stat">
 								<span class="stat-label">Assigned</span>
@@ -717,25 +813,34 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</div>
 			</body>
 			</html>`;
-	}
+  }
 }
 
 // This method is called when your extension is activated
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Copilot Insights extension is now active!');
+  console.log("Copilot Insights extension is now active!");
 
-	// Register the sidebar webview provider
-	const provider = new CopilotInsightsViewProvider(context.extensionUri, context);
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(CopilotInsightsViewProvider.viewType, provider)
-	);
+  // Register the sidebar webview provider
+  const provider = new CopilotInsightsViewProvider(
+    context.extensionUri,
+    context
+  );
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      CopilotInsightsViewProvider.viewType,
+      provider
+    )
+  );
 
-	// Optional: Register command to refresh the view
-	const refreshCommand = vscode.commands.registerCommand('vscode-copilot-insights.refresh', () => {
-		provider.loadCopilotData();
-	});
+  // Optional: Register command to refresh the view
+  const refreshCommand = vscode.commands.registerCommand(
+    "vscode-copilot-insights.refresh",
+    () => {
+      provider.loadCopilotData();
+    }
+  );
 
-	context.subscriptions.push(refreshCommand);
+  context.subscriptions.push(refreshCommand);
 }
 
 // This method is called when your extension is deactivated
