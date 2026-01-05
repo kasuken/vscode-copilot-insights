@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "publisher": "emanuelebartolesi",
     "icon": "img/logo.png",
   "repository": {
@@ -15,9 +15,15 @@
     "vscode": "^1.107.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "AI",
+    "Chat",
+    "Machine Learning",
+    "Programming Languages"
   ],
   "keywords": [
+    "ai",
+    "copilot",
     "github copilot",
     "copilot insights",
     "copilot metrics",
