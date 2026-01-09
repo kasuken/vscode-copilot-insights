@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "publisher": "emanuelebartolesi",
     "icon": "img/logo.png",
   "repository": {
@@ -60,12 +60,22 @@
         "command": "vscode-copilot-insights.refresh",
         "title": "Copilot Insights: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "vscode-copilot-insights.openSettings",
+        "title": "Copilot Insights: Open Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "vscode-copilot-insights.refresh",
+          "when": "view == copilotInsights.sidebarView",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-copilot-insights.openSettings",
           "when": "view == copilotInsights.sidebarView",
           "group": "navigation"
         }
@@ -78,6 +88,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show a fun 'mood' indicator for your remaining quota instead of the standard status."
+        },
+        "copilotInsights.progressBarMode": {
+          "type": "string",
+          "default": "remaining",
+          "enum": ["remaining", "used"],
+          "enumDescriptions": [
+            "Show remaining quota (bar empties as you use requests)",
+            "Show used quota (bar fills as you use requests)"
+          ],
+          "description": "Controls how the progress bar displays quota: 'remaining' shows quota left (default), 'used' shows quota consumed."
         }
       }
     }

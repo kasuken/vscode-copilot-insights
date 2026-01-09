@@ -31,6 +31,7 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 - One-time warning when Premium usage exceeds 85% of your monthly quota
 - Auto-refresh when the view becomes visible
 - Manual refresh button in the view title bar
+- Settings (gear) button in the view title bar
 
 > Note: This view shows plan and quota status. It is not a usage report.
 
@@ -127,12 +128,28 @@ The exported Markdown includes:
 4. Review your plan + quotas
 5. Use the refresh icon in the view title bar if needed
 
+Tip: Use the gear icon in the view title bar to open Copilot Insights settings.
+
 ---
 
 ## Refresh behavior
 
 - **Automatic:** refreshes whenever the Insights view becomes visible
 - **Manual:** run **Copilot Insights: Refresh** or click the refresh icon in the view title bar
+
+## Settings
+
+Open Settings via the gear icon in the view title bar, or search for "Copilot Insights" in VS Code Settings.
+
+### Progress bar mode
+
+Choose whether quota progress bars represent remaining quota (default) or used quota:
+
+```json
+"copilotInsights.progressBarMode": "remaining"
+```
+
+Valid values: `remaining`, `used`.
 
 ---
 

@@ -1,5 +1,11 @@
 # Change Log
 
+## [1.7.0] - 2026-01-09
+
+### Added
+- Progress bar display mode setting: show **Remaining** (default) or **Used** quota in the quota progress bars.
+- Settings (gear) button in the Insights view title bar to open Copilot Insights settings.
+
 ## [1.6.0] - 2026-01-09
 
 ### Added

@@ -586,6 +586,23 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           const statusBadge = this._getStatusBadge(percentRemaining);
           const mood = this._getMood(percentRemaining);
 
+          // Get progress bar display mode from settings
+          const progressBarMode = vscode.workspace
+            .getConfiguration("copilotInsights")
+            .get<string>("progressBarMode", "remaining");
+          const showUsed = progressBarMode === "used";
+
+          // Determine progress bar values based on mode
+          const progressPercent = showUsed ? percentUsed : percentRemaining;
+          const progressLabel = showUsed ? `${percentUsed}% used` : `${percentRemaining}% remaining`;
+          
+          // Determine progress bar color based on usage level (always based on usage for intuitive coloring)
+          const progressBarColor = percentUsed > 80 
+            ? 'var(--vscode-charts-red)' 
+            : percentUsed > 50 
+              ? 'var(--vscode-charts-yellow)' 
+              : 'var(--vscode-charts-green)';
+
           // Calculate pacing
           let pacingHtml = "";
           if (timeUntilReset.totalDays > 0) {
@@ -677,10 +694,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					<div class="quota-card">
 						<div class="quota-header">
 							<div class="quota-title" title="${quotaTooltip}">${quotaName}</div>
-							<div class="quota-badge">${percentRemaining}% remaining</div>
+							<div class="quota-badge">${progressLabel}</div>
 						</div>
 						<div class="progress-bar">
-							<div class="progress-fill" style="width: ${percentRemaining}%"></div>
+							<div class="progress-fill" style="width: ${progressPercent}%; background: ${progressBarColor};"></div>
 						</div>
 						<div class="quota-status">
 							${
@@ -1076,7 +1093,18 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(refreshCommand);
+  // Register command to open extension settings
+  const openSettingsCommand = vscode.commands.registerCommand(
+    "vscode-copilot-insights.openSettings",
+    () => {
+      vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@ext:emanuelebartolesi.vscode-copilot-insights"
+      );
+    }
+  );
+
+  context.subscriptions.push(refreshCommand, openSettingsCommand);
 }
 
 // This method is called when your extension is deactivated
