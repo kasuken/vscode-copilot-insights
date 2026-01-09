@@ -5,7 +5,7 @@
 <h1 align="center">Copilot Insights (VS Code Extension)</h1>
 
 <p align="center">
-	Understand your GitHub Copilot plan and quotas at a glance — in the VS Code sidebar and status bar.
+	Understand your GitHub Copilot plan and quotas at a glance, not productivity or usage analytics — in the VS Code sidebar and status bar.
 </p>
 
 <p align="center">
@@ -42,6 +42,8 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
     - Lists organizations where you have Copilot access
     - Displays quota cards with progress bars and pacing guidance
     - Status badges (🟢 Healthy, 🟡 Watch, 🔴 Risk) based on quota percentage
+		- Optional **Quota mood** indicator (😌 / 🙂 / 😬 / 😱) to summarize quota risk at a glance
+		- Micro-copy tooltips on critical fields (e.g. Unlimited, Premium interactions, Reset Date)
     - **Copy Summary to Clipboard** button for exporting insights as Markdown
     - Auto-refreshes when the view becomes visible
     - Manual refresh button in the title bar
@@ -69,9 +71,10 @@ Open the **Copilot Insights** icon in the Activity Bar.
 - Pacing helpers:
 	- **To last until reset**: ≤ X/day
 	- **Reset in**: Xd Xh
-	- **Reset Date** (UTC)
+	- **Reset Date**
 	- **Projections premium requests before the reset**:
 		- **Weekly average** + **workday/workhour averages**
+		- **Daily Capacity by Model Cost** (0.33x / 1x / 3x)
 
 **Plan Details**
 - Plan (e.g. Enterprise)
@@ -168,6 +171,14 @@ Working hours assume 8 hours/day (9:00–17:00):
 - `allowedPerHour = floor(remaining / totalWorkingHours)` (if `totalWorkingHours > 0`)
 
 > These workday/workhour numbers are approximations (they don’t iterate real calendar weekdays).
+
+### Premium model multipliers (0.33x / 1x / 3x)
+
+Some premium models can “cost” more (or less) per request. The **Daily Capacity by Model Cost** section provides a quick estimate of how many requests/day you can afford at common multipliers:
+
+- `0.33x`: `floor(remaining / 0.33 / daysUntilReset)`
+- `1x`: `floor(remaining / daysUntilReset)`
+- `3x`: `floor(remaining / 3 / daysUntilReset)`
 
 ---
 

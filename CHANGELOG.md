@@ -1,5 +1,15 @@
 # Change Log
 
+## [1.6.0] - 2026-01-09
+
+### Added
+- “What does this mean?” tooltips on key quota UI labels (e.g., Unlimited, Premium interactions, Reset Date, and other critical fields)
+- Optional “Quota mood” indicator (😌 / 🙂 / 😬 / 😱) to summarize quota risk at a glance
+- Daily capacity projections for common premium model multipliers (0.33x, 1x, 3x)
+
+### Changed
+- Reset Date display now shows the date only (no time)
+
 ## [1.5.0]
 
 ### Added

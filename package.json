@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "publisher": "emanuelebartolesi",
     "icon": "img/logo.png",
   "repository": {
@@ -70,6 +70,16 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Copilot Insights",
+      "properties": {
+        "copilotInsights.showMood": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a fun 'mood' indicator for your remaining quota instead of the standard status."
+        }
+      }
     }
   },
   "scripts": {

@@ -275,6 +275,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     return { days, hours, totalDays: diffDays };
   }
 
+  private _getMood(percentRemaining: number): { emoji: string; text: string } {
+    if (percentRemaining > 75) {
+      return { emoji: "😌", text: "Plenty of quota left" };
+    } else if (percentRemaining > 40) {
+      return { emoji: "🙂", text: "You’re fine" };
+    } else if (percentRemaining > 15) {
+      return { emoji: "😬", text: "Getting tight" };
+    } else {
+      return { emoji: "😱", text: "Danger zone" };
+    }
+  }
+
   private _getStatusBadge(percentRemaining: number): {
     emoji: string;
     icon: string;
@@ -358,7 +370,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
             );
             markdown += `- **To last until reset:** ≤ ${allowedPerDay}/day\n`;
             markdown += `- **Reset in:** ${timeUntilReset.days}d ${timeUntilReset.hours}h\n`;
-            markdown += `- **Reset Date:** ${this._formatDateTime(
+            markdown += `- **Reset Date:** ${this._formatDate(
               data.quota_reset_date_utc
             )}\n`;
           }
@@ -510,6 +522,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     const timeSince = this._calculateTimeSince(asOfTime);
     const orgCount = data.organization_list?.length || 0;
 
+    // Check config for mood
+    const showMood = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get("showMood", true);
+
     // Check if data is stale (> 1 hour old)
     const isStale =
       new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
@@ -520,15 +537,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				<h2 class="section-title">Plan Details</h2>
 				<div class="summary-cards">
 					<div class="summary-card">
-						<div class="card-label">Plan</div>
+						<div class="card-label" title="Your GitHub Copilot subscription plan">Plan</div>
 						<div class="card-value">${data.copilot_plan || "Unknown"}</div>
 					</div>
 					<div class="summary-card">
-						<div class="card-label">Chat</div>
+						<div class="card-label" title="Access to Copilot Chat features">Chat</div>
 						<div class="card-value">${data.chat_enabled ? "Enabled" : "Disabled"}</div>
 					</div>
 					<div class="summary-card">
-						<div class="card-label">Orgs</div>
+						<div class="card-label" title="Organizations providing your Copilot seat">Orgs</div>
 						<div class="card-value">${orgCount}${orgCount > 1 ? " 🔗" : ""}</div>
 					</div>
 				</div>
@@ -544,12 +561,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
             .replace(/_/g, " ")
             .replace(/\b\w/g, (l) => l.toUpperCase());
 
+          let quotaTooltip = "";
+          if (quota.quota_id === "premium_interactions") {
+            quotaTooltip =
+              "Premium interactions are limited requests for advanced Copilot models.";
+          }
+
           if (quota.unlimited) {
             return `
 						<div class="quota-card">
 							<div class="quota-header">
-								<div class="quota-title">${quotaName}</div>
-								<div class="quota-badge unlimited">Unlimited</div>
+								<div class="quota-title" title="${quotaTooltip}">${quotaName}</div>
+								<div class="quota-badge unlimited" title="You have unlimited usage for this feature">Unlimited</div>
 							</div>
 						</div>
 					`;
@@ -561,6 +584,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
             (quota.remaining / quota.entitlement) * 100
           );
           const statusBadge = this._getStatusBadge(percentRemaining);
+          const mood = this._getMood(percentRemaining);
 
           // Calculate pacing
           let pacingHtml = "";
@@ -585,21 +609,30 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
                 ? Math.floor(quota.remaining / totalWorkingHours)
                 : 0;
 
+            // Calculate projections for multipliers
+            const budget033 = Math.floor(
+              quota.remaining / 0.33 / timeUntilReset.totalDays
+            );
+            const budget1 = Math.floor(quota.remaining / timeUntilReset.totalDays);
+            const budget3 = Math.floor(
+              quota.remaining / 3 / timeUntilReset.totalDays
+            );
+
             pacingHtml = `
 						<div class="quota-pacing-highlight">
 							<div class="pacing-row">
-								<span class="pacing-label">To last until reset:</span>
+								<span class="pacing-label" title="Maximum average daily usage to stay within quota">To last until reset:</span>
 								<span class="pacing-value">≤ ${allowedPerDay}/day</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label">Reset in:</span>
+								<span class="pacing-label" title="Time remaining until quota reset">Reset in:</span>
 								<span class="pacing-value">${timeUntilReset.days}d ${
               timeUntilReset.hours
             }h</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label">Reset Date:</span>
-								<span class="pacing-value">${this._formatDateTime(
+								<span class="pacing-label" title="Date when your monthly quota resets">Reset Date:</span>
+								<span class="pacing-value">${this._formatDate(
                   data.quota_reset_date_utc
                 )}</span>
 							</div>
@@ -608,17 +641,34 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 								Projections premium requests before the reset
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label">Weekly average:</span>
+								<span class="pacing-label" title="Recommended weekly limit">Weekly average:</span>
 								<span class="pacing-value">≤ ${allowedPerWeek}/week</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label">Work day average:</span>
+								<span class="pacing-label" title="Recommended daily limit for Mon-Fri">Work day average:</span>
 								<span class="pacing-value">≤ ${allowedPerWorkDay}/day (Mon-Fri)</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label">Work hour average:</span>
+								<span class="pacing-label" title="Recommended hourly limit for work hours (9-5)">Work hour average:</span>
 								<span class="pacing-value">≤ ${allowedPerHour}/hour (9-5)</span>
 							</div>
+
+              <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+              <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
+                Daily Capacity by Model Cost
+              </div>
+              <div class="pacing-row">
+                <span class="pacing-label" title="Model cost multiplier: 0.33x">Efficient (0.33x):</span>
+                <span class="pacing-value">~${budget033}/day</span>
+              </div>
+              <div class="pacing-row">
+                <span class="pacing-label" title="Model cost multiplier: 1x">Standard (1x):</span>
+                <span class="pacing-value">~${budget1}/day</span>
+              </div>
+              <div class="pacing-row">
+                <span class="pacing-label" title="Model cost multiplier: 3x">Advanced (3x):</span>
+                <span class="pacing-value">~${budget3}/day</span>
+              </div>
 						</div>
 					`;
           }
@@ -626,27 +676,32 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           return `
 					<div class="quota-card">
 						<div class="quota-header">
-							<div class="quota-title">${quotaName}</div>
+							<div class="quota-title" title="${quotaTooltip}">${quotaName}</div>
 							<div class="quota-badge">${percentRemaining}% remaining</div>
 						</div>
 						<div class="progress-bar">
 							<div class="progress-fill" style="width: ${percentRemaining}%"></div>
 						</div>
 						<div class="quota-status">
-							<span class="stat-label">Status:</span>
-							<span class="stat-value" style="color: ${statusBadge.color};">${statusBadge.emoji} ${statusBadge.label}</span>
+							${
+                showMood
+                  ? `<span class="stat-label">Mood:</span>
+								   <span class="stat-value" title="${mood.text}">${mood.emoji} ${mood.text}</span>`
+                  : `<span class="stat-label" title="Usage health based on remaining quota and time">Status:</span>
+								   <span class="stat-value" style="color: ${statusBadge.color};">${statusBadge.emoji} ${statusBadge.label}</span>`
+              }
 						</div>
 						<div class="quota-stats">
 							<div class="stat">
-								<span class="stat-label">Remaining:</span>
+								<span class="stat-label" title="Calls available until the reset date">Remaining:</span>
 								<span class="stat-value">${quota.remaining}</span>
 							</div>
 							<div class="stat">
-								<span class="stat-label">Used:</span>
+								<span class="stat-label" title="Calls made since the last reset">Used:</span>
 								<span class="stat-value">${used}</span>
 							</div>
 							<div class="stat">
-								<span class="stat-label">Total:</span>
+								<span class="stat-label" title="Total calls allowed in this period">Total:</span>
 								<span class="stat-value">${quota.entitlement}</span>
 							</div>
 						</div>
@@ -655,7 +710,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
               quota.overage_permitted
                 ? `
 							<div class="quota-overage">
-								<span>Overage permitted</span>
+								<span title="Additional usage allowed beyond standard quota">Overage permitted</span>
 								${
                   quota.overage_count > 0
                     ? `<span class="overage-count">${quota.overage_count} used</span>`
@@ -957,11 +1012,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					<div class="quota-card">
 						<div class="quota-stats">
 							<div class="stat">
-								<span class="stat-label">SKU/Access</span>
+								<span class="stat-label" title="The specific SKU or access type of your subscription">SKU/Access</span>
 								<span class="stat-value">${data.access_type_sku || "Unknown"}</span>
 							</div>
 							<div class="stat">
-								<span class="stat-label">Assigned</span>
+								<span class="stat-label" title="Date when this seat was assigned to you">Assigned</span>
 								<span class="stat-value">${this._formatDate(data.assigned_date)}</span>
 							</div>
 						</div>
