@@ -37,6 +37,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "copilotInsights.sidebarView";
   private _view?: vscode.WebviewView;
   private _statusBarItem: vscode.StatusBarItem;
+  private _bottomStatusBarItem: vscode.StatusBarItem;
+  private _lastData?: CopilotUserData;
   private readonly _premiumUsageAlertThreshold = 85;
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlert.resetDate";
@@ -45,7 +47,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     private readonly _extensionUri: vscode.Uri,
     private readonly _context: vscode.ExtensionContext
   ) {
-    // Create status bar item
+    // Create status bar items
     this._statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100
@@ -53,7 +55,73 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     this._statusBarItem.command = "copilotInsights.sidebarView.focus";
     this._statusBarItem.text = "$(loading~spin) Copilot";
     this._statusBarItem.tooltip = "Loading Copilot insights...";
+
+    this._bottomStatusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      -100 // Lower priority to position it appropriately on the left
+    );
+    this._bottomStatusBarItem.command = "copilotInsights.sidebarView.focus";
+    this._bottomStatusBarItem.text = "$(loading~spin) Copilot";
+    this._bottomStatusBarItem.tooltip = "Loading Copilot insights...";
+
+    // Initially show both status bars, but visibility will be controlled by configuration
     this._statusBarItem.show();
+    this._bottomStatusBarItem.show();
+
+    // Update visibility based on configuration
+    this._updateStatusBarVisibility();
+
+    // Listen for configuration changes to update the status bar and sidebar in real-time
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      const affectedVisual = event.affectsConfiguration('copilotInsights.statusBarLocation') ||
+        event.affectsConfiguration('copilotInsights.statusBarStyle') ||
+        event.affectsConfiguration('copilotInsights.progressBarMode') ||
+        event.affectsConfiguration('copilotInsights.statusBar.showName') ||
+        event.affectsConfiguration('copilotInsights.statusBar.showNumericalQuota') ||
+        event.affectsConfiguration('copilotInsights.statusBar.showVisualIndicator') ||
+        event.affectsConfiguration('copilotInsights.showMood');
+
+      if (affectedVisual && this._lastData) {
+        // Update the status bar and sidebar with the cached data
+        this._updateStatusBar(this._lastData);
+        this._updateWithData(this._lastData);
+      }
+    });
+  }
+
+  // Getters to access status bar items for disposal
+  get statusBarItem(): vscode.StatusBarItem {
+    return this._statusBarItem;
+  }
+
+  get bottomStatusBarItem(): vscode.StatusBarItem {
+    return this._bottomStatusBarItem;
+  }
+
+  private _updateStatusBarVisibility() {
+    const location = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<string>("statusBarLocation", "right");
+
+    // Hide or show status bars based on configuration
+    switch (location) {
+      case "right":
+        this._statusBarItem.show();
+        this._bottomStatusBarItem.hide();
+        break;
+      case "left":
+        this._statusBarItem.hide();
+        this._bottomStatusBarItem.show();
+        break;
+      case "both":
+        this._statusBarItem.show();
+        this._bottomStatusBarItem.show();
+        break;
+      default:
+        this._statusBarItem.show();
+        this._bottomStatusBarItem.hide();
+        break;
+    }
   }
 
   public resolveWebviewView(
@@ -171,11 +239,29 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       this._view.webview.html = this._getErrorHtml(error);
     }
-    this._statusBarItem.text = "$(error) Copilot";
+
+    // Update visibility based on configuration
+    this._updateStatusBarVisibility();
+
+    // Apply the configured style to error state as well
+    const style = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<string>("statusBarStyle", "textual");
+
+    const errorText = "$(error) Copilot";
+    this._statusBarItem.text = errorText;
+    this._bottomStatusBarItem.text = errorText;
     this._statusBarItem.tooltip = `Error: ${error}`;
+    this._bottomStatusBarItem.tooltip = `Error: ${error}`;
   }
 
   private _updateStatusBar(data: CopilotUserData) {
+    // Cache the data so we can refresh the status bar when settings change
+    this._lastData = data;
+
+    // Update visibility based on configuration
+    this._updateStatusBarVisibility();
+
     // Find premium interactions quota
     const quotaSnapshotsArray = data.quota_snapshots
       ? Object.values(data.quota_snapshots)
@@ -193,9 +279,25 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
       const statusBadge = this._getStatusBadge(percentRemaining);
 
-      this._statusBarItem.text = `${statusBadge.icon} Copilot: ${premiumQuota.remaining}/${premiumQuota.entitlement} (${percentRemaining}%)`;
-      this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
+      // Get the configured style and toggles
+      const config = vscode.workspace.getConfiguration("copilotInsights");
+      const style = config.get<string>("statusBarStyle", "textual");
+      const showName = config.get<boolean>("statusBar.showName", true);
+      const showNumericalQuota = config.get<boolean>("statusBar.showNumericalQuota", true);
+      const showVisualIndicator = config.get<boolean>("statusBar.showVisualIndicator", true);
 
+      // If all toggles are disabled, hide the status bar
+      if (!showName && !showNumericalQuota && !showVisualIndicator) {
+        this._statusBarItem.hide();
+        this._bottomStatusBarItem.hide();
+        return;
+      }
+
+      // Format the text based on the selected style
+      const rightSideText = this._formatStatusBarText(style, percentRemaining, percentUsed, premiumQuota, statusBadge);
+      this._statusBarItem.text = rightSideText;
+
+      // Update tooltip for right side
       // Calculate days until reset
       const latestSnapshot = quotaSnapshotsArray[0];
       const asOfTime =
@@ -207,19 +309,81 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
       this._statusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot Premium Interactions**\n\n` +
-          `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
-          `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
-          `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
-          `• Plan: **${data.copilot_plan}**\n\n` +
-          `_Click to view full details_`
+        `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
+        `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
+        `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
+        `• Plan: **${data.copilot_plan}**\n\n` +
+        `_Click to view full details_`
       );
+
+      this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
     } else {
+      // For unlimited plans
       this._statusBarItem.text = "$(check) Copilot";
+      this._bottomStatusBarItem.text = "$(check) Copilot";
+
       this._statusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot**\n\n` +
-          `• Plan: **${data.copilot_plan}**\n` +
-          `• Premium Interactions: **Unlimited**\n\n` +
-          `_Click to view full details_`
+        `• Plan: **${data.copilot_plan}**\n` +
+        `• Premium Interactions: **Unlimited**\n\n` +
+        `_Click to view full details_`
+      );
+      this._bottomStatusBarItem.tooltip = this._statusBarItem.tooltip;
+    }
+
+    // Update the bottom status bar as well
+    this._updateBottomStatusBar(data);
+  }
+
+  private _updateBottomStatusBar(data: CopilotUserData) {
+    // Find premium interactions quota
+    const quotaSnapshotsArray = data.quota_snapshots
+      ? Object.values(data.quota_snapshots)
+      : [];
+
+    const premiumQuota = quotaSnapshotsArray.find(
+      (q) => q.quota_id === "premium_interactions"
+    );
+
+    if (premiumQuota && !premiumQuota.unlimited) {
+      const percentRemaining = Math.round(
+        (premiumQuota.remaining / premiumQuota.entitlement) * 100
+      );
+      const used = premiumQuota.entitlement - premiumQuota.remaining;
+      const percentUsed = Math.round((used / premiumQuota.entitlement) * 100);
+
+      // Get the configured style
+      const style = vscode.workspace
+        .getConfiguration("copilotInsights")
+        .get<string>("statusBarStyle", "textual");
+
+      // Format the text based on the selected style (using same formatting as right side)
+      const bottomText = this._formatStatusBarText(
+        style,
+        percentRemaining,
+        percentUsed,
+        premiumQuota,
+        this._getStatusBadge(percentRemaining)
+      );
+      this._bottomStatusBarItem.text = bottomText;
+
+      // Set tooltip with detailed information
+      this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
+        `**GitHub Copilot Usage**\n\n` +
+        `• Used: **${used}** of **${premiumQuota.entitlement}** (${percentUsed}%)\n` +
+        `• Remaining: **${premiumQuota.remaining}** (${percentRemaining}%)\n` +
+        `• Status: **${this._getStatusBadge(percentRemaining).label}** ${this._getStatusBadge(percentRemaining).emoji}\n\n` +
+        `_Click to view full details_`
+      );
+    } else {
+      // For unlimited plans - use same icon as right side
+      this._bottomStatusBarItem.text = "$(check) Copilot";
+
+      this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
+        `**GitHub Copilot Usage**\n\n` +
+        `• Plan: **${data.copilot_plan || "Unknown"}**\n` +
+        `• Status: **Unlimited**\n\n` +
+        `_Click to view full details_`
       );
     }
   }
@@ -595,12 +759,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           // Determine progress bar values based on mode
           const progressPercent = showUsed ? percentUsed : percentRemaining;
           const progressLabel = showUsed ? `${percentUsed}% used` : `${percentRemaining}% remaining`;
-          
+
           // Determine progress bar color based on usage level (always based on usage for intuitive coloring)
-          const progressBarColor = percentUsed > 80 
-            ? 'var(--vscode-charts-red)' 
-            : percentUsed > 50 
-              ? 'var(--vscode-charts-yellow)' 
+          const progressBarColor = percentUsed > 80
+            ? 'var(--vscode-charts-red)'
+            : percentUsed > 50
+              ? 'var(--vscode-charts-yellow)'
               : 'var(--vscode-charts-green)';
 
           // Calculate pacing
@@ -643,15 +807,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Time remaining until quota reset">Reset in:</span>
-								<span class="pacing-value">${timeUntilReset.days}d ${
-              timeUntilReset.hours
-            }h</span>
+								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours
+              }h</span>
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Date when your monthly quota resets">Reset Date:</span>
 								<span class="pacing-value">${this._formatDate(
-                  data.quota_reset_date_utc
-                )}</span>
+                data.quota_reset_date_utc
+              )}</span>
 							</div>
 						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
@@ -700,13 +863,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div class="progress-fill" style="width: ${progressPercent}%; background: ${progressBarColor};"></div>
 						</div>
 						<div class="quota-status">
-							${
-                showMood
-                  ? `<span class="stat-label">Mood:</span>
+							${showMood
+              ? `<span class="stat-label">Mood:</span>
 								   <span class="stat-value" title="${mood.text}">${mood.emoji} ${mood.text}</span>`
-                  : `<span class="stat-label" title="Usage health based on remaining quota and time">Status:</span>
+              : `<span class="stat-label" title="Usage health based on remaining quota and time">Status:</span>
 								   <span class="stat-value" style="color: ${statusBadge.color};">${statusBadge.emoji} ${statusBadge.label}</span>`
-              }
+            }
 						</div>
 						<div class="quota-stats">
 							<div class="stat">
@@ -723,19 +885,17 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 						</div>
 						${pacingHtml}
-						${
-              quota.overage_permitted
-                ? `
+						${quota.overage_permitted
+              ? `
 							<div class="quota-overage">
 								<span title="Additional usage allowed beyond standard quota">Overage permitted</span>
-								${
-                  quota.overage_count > 0
-                    ? `<span class="overage-count">${quota.overage_count} used</span>`
-                    : ""
-                }
+								${quota.overage_count > 0
+                ? `<span class="overage-count">${quota.overage_count} used</span>`
+                : ""
+              }
 							</div>
 						`
-                : ""
+              : ""
             }
 					</div>
 				`;
@@ -751,15 +911,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					<h2 class="section-title">Organizations with Copilot Access</h2>
 					<div class="org-list">
 						${data.organization_list
-              .map(
-                (org) => `
+          .map(
+            (org) => `
 							<div class="org-item">
 								<div class="org-name">${org.name || org.login}</div>
 								<div class="org-login">@${org.login}</div>
 							</div>
 						`
-              )
-              .join("")}
+          )
+          .join("")}
 					</div>
 				</div>
 			`;
@@ -798,12 +958,13 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						border-radius: 2px;
 						font-size: 12px;
 					}
-					.summary-cards {
-						display: grid;
-						grid-template-columns: 1fr 1fr 1fr;
-						gap: 8px;
-						margin-bottom: 16px;
-					}
+          .summary-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+            box-sizing: border-box;
+          }
 					.summary-card {
 						background-color: var(--vscode-editor-background);
 						border: 1px solid var(--vscode-panel-border);
@@ -1006,18 +1167,16 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</style>
 			</head>
 			<body>
-				${
-          isStale
-            ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>`
-            : ""
-        }
+				${isStale
+        ? `<div class="warning-banner">⚠️ Data may be stale (fetched over 1 hour ago)</div>`
+        : ""
+      }
 
 				<div class="section">
 					<h2 class="section-title">Quotas</h2>
-					${
-            quotasHtml ||
-            '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'
-          }
+					${quotasHtml ||
+      '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'
+      }
 				</div>
 
 				${summaryCardsHtml}
@@ -1067,6 +1226,132 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 			</body>
 			</html>`;
   }
+
+  private _formatStatusBarText(
+    style: string,
+    percentRemaining: number,
+    percentUsed: number,
+    premiumQuota: QuotaSnapshot,
+    statusBadge: { emoji: string; icon: string; label: string; color: string }
+  ): string {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    const progressBarMode = config.get<string>("progressBarMode", "remaining");
+    const showName = config.get<boolean>("statusBar.showName", true);
+    const showNumericalQuota = config.get<boolean>("statusBar.showNumericalQuota", true);
+    const showVisualIndicator = config.get<boolean>("statusBar.showVisualIndicator", true);
+
+    const displayPercent = progressBarMode === "used" ? percentUsed : percentRemaining;
+
+    // Build the base text components based on toggles
+    const namePart = showName ? "Copilot: " : "";
+    const quotaPart = showNumericalQuota
+      ? (progressBarMode === "used"
+        ? `${percentUsed}/${premiumQuota.entitlement}`
+        : `${premiumQuota.remaining}/${premiumQuota.entitlement}`)
+      : "";
+
+    // If visual indicator is disabled, return only name + quota (no style-specific formatting or percentage)
+    if (!showVisualIndicator) {
+      // If we have name or quota, show them
+      if (showName || showNumericalQuota) {
+        return `${statusBadge.icon} ${namePart}${quotaPart}`.trim();
+      }
+      // If nothing to show, return just the icon
+      return statusBadge.icon;
+    }
+
+    // Normalize legacy style names for backward compatibility
+    let activeStyle = style;
+    switch (style) {
+      case "textual": activeStyle = "detailed-original"; break;
+      case "blocks": activeStyle = "solid-bar"; break;
+      case "graphical": activeStyle = "shaded-bar"; break;
+      case "compact": activeStyle = "minimalist"; break;
+      case "emoji": activeStyle = "adaptive-emoji"; break;
+      case "ring": activeStyle = "circular-ring"; break;
+    }
+
+    switch (activeStyle) {
+      case "solid-bar":
+        const totalBlocks = 5;
+        const filledBlocks = Math.ceil((displayPercent / 100) * totalBlocks);
+
+        let progressBar = '';
+        for (let i = 0; i < totalBlocks; i++) {
+          if (i < filledBlocks) {
+            progressBar += '█';
+          } else {
+            progressBar += '░';
+          }
+        }
+
+        // Build visual part based on toggle
+        const visualPart = showVisualIndicator ? `${progressBar} ` : "";
+        const quotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${quotaWithSpace}${visualPart}${displayPercent}%`;
+
+      case "shaded-bar":
+        const graphicBlocks = 5;
+        const graphicFilledBlocks = Math.ceil((displayPercent / 100) * graphicBlocks);
+
+        let graphicBar = '';
+        for (let i = 0; i < graphicBlocks; i++) {
+          if (i < graphicFilledBlocks) {
+            graphicBar += '▓';
+          } else {
+            graphicBar += '░';
+          }
+        }
+
+        // Build visual part based on toggle
+        const graphicVisualPart = showVisualIndicator ? `${graphicBar} ` : "";
+        const graphicQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${graphicQuotaWithSpace}${graphicVisualPart}${displayPercent}%`;
+
+      case "adaptive-emoji":
+        let moodEmoji = "😌";
+        if (percentUsed >= 90) { moodEmoji = "😱"; }
+        else if (percentUsed >= 75) { moodEmoji = "😬"; }
+        else if (percentUsed >= 50) { moodEmoji = "🙂"; }
+
+        // Build visual part based on toggle
+        const emojiVisualPart = showVisualIndicator ? `${moodEmoji} ` : "";
+        const emojiQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${emojiQuotaWithSpace}${emojiVisualPart}${displayPercent}%`;
+
+      case "minimalist":
+        const miniQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${miniQuotaWithSpace}${displayPercent}%`;
+
+      case "circular-ring":
+        // Use "Large" variants: ◯, ◔, ◑, ◕, ⬤
+        const ringChars = ["◯", "◔", "◑", "◕", "⬤"];
+        const ringIdx = Math.min(Math.floor((displayPercent / 100) * 4.9), 4);
+        const ringChar = ringChars[ringIdx];
+        // Build visual part based on toggle
+        const ringVisualPart = showVisualIndicator ? `${ringChar} ` : "";
+        const ringQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${ringQuotaWithSpace}${ringVisualPart}${displayPercent}%`;
+
+      case "progress-capsule":
+        // Build visual part based on toggle
+        const capsuleVisualPart = showVisualIndicator ? "◖ " : "";
+        const capsuleEndPart = showVisualIndicator ? " ◗" : "";
+        const capsuleQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        return `${statusBadge.icon} ${namePart}${capsuleQuotaWithSpace}${capsuleVisualPart}${displayPercent}%${capsuleEndPart}`;
+
+      case "detailed-original":
+      default:
+        // Build detailed text: name + quota + percentage
+        const percentPart = `(${displayPercent}%)`;
+        const detailedQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
+        if (showName || showNumericalQuota) {
+          return `${statusBadge.icon} ${namePart}${detailedQuotaWithSpace}${percentPart}`;
+        }
+        // Fallback to just percentage if both are disabled
+        return `${statusBadge.icon} ${percentPart}`;
+    }
+  }
 }
 
 // This method is called when your extension is activated
@@ -1084,6 +1369,24 @@ export function activate(context: vscode.ExtensionContext) {
       provider
     )
   );
+
+  // One-time initialization: Set defaults on first install
+  const INIT_KEY = "copilotInsights.hasInitialized";
+  const hasInitialized = context.globalState.get<boolean>(INIT_KEY, false);
+
+  if (!hasInitialized) {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    // Set all toggles to enabled and style to "detailed-original"
+    config.update("statusBar.showName", true, vscode.ConfigurationTarget.Global);
+    config.update("statusBar.showNumericalQuota", true, vscode.ConfigurationTarget.Global);
+    config.update("statusBar.showVisualIndicator", true, vscode.ConfigurationTarget.Global);
+    config.update("statusBarStyle", "detailed-original", vscode.ConfigurationTarget.Global);
+    // Mark as initialized
+    context.globalState.update(INIT_KEY, true);
+  }
+
+  // Trigger initial data load to populate status bars
+  provider.loadCopilotData();
 
   // Optional: Register command to refresh the view
   const refreshCommand = vscode.commands.registerCommand(
@@ -1104,8 +1407,38 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(refreshCommand, openSettingsCommand);
+  // Register command to reset all settings to defaults
+  const resetDefaultsCommand = vscode.commands.registerCommand(
+    "vscode-copilot-insights.resetToDefaults",
+    async () => {
+      const result = await vscode.window.showWarningMessage(
+        "Reset all Copilot Insights settings to defaults?",
+        "Reset",
+        "Cancel"
+      );
+
+      if (result === "Reset") {
+        const config = vscode.workspace.getConfiguration("copilotInsights");
+        // Reset all settings to default values
+        await config.update("statusBar.showName", true, vscode.ConfigurationTarget.Global);
+        await config.update("statusBar.showNumericalQuota", true, vscode.ConfigurationTarget.Global);
+        await config.update("statusBar.showVisualIndicator", true, vscode.ConfigurationTarget.Global);
+        await config.update("statusBarStyle", "detailed-original", vscode.ConfigurationTarget.Global);
+        await config.update("statusBarLocation", "right", vscode.ConfigurationTarget.Global);
+        await config.update("progressBarMode", "remaining", vscode.ConfigurationTarget.Global);
+
+        vscode.window.showInformationMessage("Copilot Insights settings reset to defaults.");
+        // Refresh the display
+        provider.loadCopilotData();
+      }
+    }
+  );
+
+  context.subscriptions.push(refreshCommand, openSettingsCommand, resetDefaultsCommand);
+
+  // Add the status bar items to subscriptions so they can be disposed properly
+  context.subscriptions.push(provider.statusBarItem, provider.bottomStatusBarItem);
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }

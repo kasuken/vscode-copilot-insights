@@ -4,7 +4,7 @@
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
   "version": "1.7.0",
   "publisher": "emanuelebartolesi",
-    "icon": "img/logo.png",
+  "icon": "img/logo.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/kasuken/vscode-copilot-insights.git"
@@ -34,7 +34,9 @@
     "usage tracking",
     "productivity"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -65,6 +67,10 @@
         "command": "vscode-copilot-insights.openSettings",
         "title": "Copilot Insights: Open Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "vscode-copilot-insights.resetToDefaults",
+        "title": "Copilot Insights: Reset to Defaults"
       }
     ],
     "menus": {
@@ -92,12 +98,68 @@
         "copilotInsights.progressBarMode": {
           "type": "string",
           "default": "remaining",
-          "enum": ["remaining", "used"],
+          "enum": [
+            "remaining",
+            "used"
+          ],
           "enumDescriptions": [
             "Show remaining quota (bar empties as you use requests)",
             "Show used quota (bar fills as you use requests)"
           ],
           "description": "Controls how the progress bar displays quota: 'remaining' shows quota left (default), 'used' shows quota consumed."
+        },
+        "copilotInsights.statusBarLocation": {
+          "type": "string",
+          "default": "right",
+          "enum": [
+            "right",
+            "left",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Show status bar on the right side (original location)",
+            "Show status bar on the left side (bottom status bar)",
+            "Show status bar on both sides"
+          ],
+          "description": "Controls where the Copilot status bar appears: 'right' (original location), 'left' (bottom status bar), or 'both' (show on both sides)."
+        },
+        "copilotInsights.statusBarStyle": {
+          "type": "string",
+          "default": "detailed-original",
+          "enum": [
+            "detailed-original",
+            "progress-capsule",
+            "circular-ring",
+            "solid-bar",
+            "shaded-bar",
+            "minimalist",
+            "adaptive-emoji"
+          ],
+          "enumDescriptions": [
+            "Original (Detailed): Show name, numerical quota and percentage (e.g., 'Copilot: 20/100 (80%)')",
+            "Progress Capsule: Show percentage wrapped in large circular caps (e.g., '◖ 80% ◗')",
+            "Circular Progress Ring: Show a circular ring progression (e.g., '◔ 80%')",
+            "Solid Progress Bar: Show visual solid blocks (e.g., '████░ 80%')",
+            "Shaded Progress Bar: Show visual shaded blocks (e.g., '▓▓▓▓░ 80%')",
+            "Minimalist: Show icon and percentage only (e.g., '80%')",
+            "Adaptive Status Emoji: Show an emoji-based status indicator (e.g., '😌 80%')"
+          ],
+          "description": "Controls the visual style of the status bar indicator."
+        },
+        "copilotInsights.statusBar.showName": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 'Copilot:' label in status bar."
+        },
+        "copilotInsights.statusBar.showNumericalQuota": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show numerical quota (e.g., '20/100') in status bar."
+        },
+        "copilotInsights.statusBar.showVisualIndicator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show visual indicator (e.g., progress bars, rings, emojis) in status bar."
         }
       }
     }
