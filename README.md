@@ -50,6 +50,9 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
     - Manual refresh button in the title bar
   - **Status bar indicator**:
     - Compact view of Premium Interactions remaining/total + percentage
+    - **Customizable visual styles**: detailed, progress capsule, circular ring, solid bar, shaded bar, minimalist, or adaptive emoji
+    - **Flexible positioning**: choose left, right, or both sides of the status bar
+    - **Granular display control**: toggle name, numerical quota, and visual indicators independently
     - Severity icons and status badges based on remaining percentage
     - Tooltip with status label and reset information
 		- Shows a warning notification once per reset cycle when usage passes 85%

@@ -1,5 +1,17 @@
 # Change Log
 
+## [1.8.0] - 2026-01-12
+
+### Added
+- Status bar customization settings for location and visual style
+- Multiple status bar style options: detailed, progress capsule, circular ring, solid bar, shaded bar, minimalist, and adaptive emoji
+- Ability to position status bar on left, right, or both sides
+- Granular control over status bar elements (name, numerical quota, visual indicator)
+
+### Changed
+- Enhanced status bar configuration with more flexible display options
+- Improved visual feedback with multiple indicator styles
+
 ## [1.7.0] - 2026-01-09
 
 ### Added
