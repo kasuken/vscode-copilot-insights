@@ -33,6 +33,15 @@ interface CopilotUserData {
   tracking_id?: string;
 }
 
+interface LocalSnapshot {
+  timestamp: string;
+  premium_remaining: number;
+  premium_entitlement: number;
+}
+
+const SNAPSHOT_HISTORY_KEY = "copilotInsights.snapshotHistory";
+const MAX_SNAPSHOTS = 10;
+
 class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "copilotInsights.sidebarView";
   private _view?: vscode.WebviewView;
@@ -42,6 +51,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   private readonly _premiumUsageAlertThreshold = 85;
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlert.resetDate";
+  private _snapshotHistory: LocalSnapshot[] = [];
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -67,6 +77,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     // Initially show both status bars, but visibility will be controlled by configuration
     this._statusBarItem.show();
     this._bottomStatusBarItem.show();
+
+    // Load snapshot history from storage
+    this._snapshotHistory = this._context.globalState.get<LocalSnapshot[]>(SNAPSHOT_HISTORY_KEY, []);
 
     // Update visibility based on configuration
     this._updateStatusBarVisibility();
@@ -209,6 +222,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         quota_reset_date: apiData.quota_reset_date ?? "",
         tracking_id: apiData.tracking_id,
       };
+
+      // Record snapshot for history tracking
+      const quotaArr = data.quota_snapshots ? Object.values(data.quota_snapshots) : [];
+      const premiumQ = quotaArr.find((q) => q.quota_id === "premium_interactions");
+      if (premiumQ && !premiumQ.unlimited) {
+        this._addSnapshot(premiumQ.remaining, premiumQ.entitlement);
+      }
+
       this._updateWithData(data);
       this._updateStatusBar(data);
     } catch (error) {
@@ -479,6 +500,192 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         color: "var(--vscode-charts-red)",
       };
     }
+  }
+
+  private _addSnapshot(premiumRemaining: number, premiumEntitlement: number): void {
+    // Don't add snapshots with 0 or invalid values
+    if (premiumRemaining <= 0) {
+      return;
+    }
+
+    // Don't add if value is the same as the last snapshot
+    if (this._snapshotHistory.length > 0 && this._snapshotHistory[0].premium_remaining === premiumRemaining) {
+      return;
+    }
+
+    const newSnapshot: LocalSnapshot = {
+      timestamp: new Date().toISOString(),
+      premium_remaining: premiumRemaining,
+      premium_entitlement: premiumEntitlement,
+    };
+
+    this._snapshotHistory.unshift(newSnapshot);
+
+    if (this._snapshotHistory.length > MAX_SNAPSHOTS) {
+      this._snapshotHistory = this._snapshotHistory.slice(0, MAX_SNAPSHOTS);
+    }
+
+    this._context.globalState.update(SNAPSHOT_HISTORY_KEY, this._snapshotHistory);
+  }
+
+  private _getSnapshotComparisons(): { sinceLastRefresh: number | null; sinceYesterday: number | null } {
+    const result = { sinceLastRefresh: null as number | null, sinceYesterday: null as number | null };
+
+    if (this._snapshotHistory.length < 2) {
+      return result;
+    }
+
+    const current = this._snapshotHistory[0];
+    const previousRefresh = this._snapshotHistory[1];
+
+    result.sinceLastRefresh = current.premium_remaining - previousRefresh.premium_remaining;
+
+    const now = new Date(current.timestamp).getTime();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+
+    let closestYesterdaySnapshot: LocalSnapshot | null = null;
+    let closestTimeDiff = Infinity;
+
+    for (const snapshot of this._snapshotHistory) {
+      const snapshotTime = new Date(snapshot.timestamp).getTime();
+      const timeDiff = Math.abs(snapshotTime - oneDayAgo);
+
+      if (snapshotTime <= now - 12 * 60 * 60 * 1000 && timeDiff < closestTimeDiff) {
+        closestTimeDiff = timeDiff;
+        closestYesterdaySnapshot = snapshot;
+      }
+    }
+
+    if (closestYesterdaySnapshot) {
+      result.sinceYesterday = current.premium_remaining - closestYesterdaySnapshot.premium_remaining;
+    }
+
+    return result;
+  }
+
+  private _generateSnapshotChartHtml(): string {
+    if (this._snapshotHistory.length < 2) {
+      return "";
+    }
+
+    // Filter out snapshots with 0 value (invalid/initial entries)
+    const validSnapshots = this._snapshotHistory.filter(s => s.premium_remaining > 0);
+    if (validSnapshots.length < 2) {
+      return "";
+    }
+
+    const snapshots = [...validSnapshots].reverse();
+    const count = snapshots.length;
+
+    const width = 280;
+    const height = 100;
+    const pad = { top: 10, right: 10, bottom: 25, left: 40 };
+    const cw = width - pad.left - pad.right;
+    const ch = height - pad.top - pad.bottom;
+
+    const vals = snapshots.map(s => s.premium_remaining);
+    const minV = Math.min(...vals);
+    const maxV = Math.max(...vals);
+    const range = maxV - minV || 1;
+
+    const yMin = Math.max(0, minV - range * 0.1);
+    const yMax = maxV + range * 0.1;
+    const yRange = yMax - yMin || 1;
+
+    const pts = snapshots.map((s, i) => {
+      const x = pad.left + (i / (count - 1)) * cw;
+      const y = pad.top + ch - ((s.premium_remaining - yMin) / yRange) * ch;
+      return { x, y, v: s.premium_remaining, t: s.timestamp };
+    });
+
+    let linePath = "";
+    pts.forEach((p, i) => {
+      linePath += (i === 0 ? "M" : "L") + " " + p.x.toFixed(1) + " " + p.y.toFixed(1) + " ";
+    });
+
+    const lastPt = pts[pts.length - 1];
+    const areaPath = linePath + "L " + lastPt.x.toFixed(1) + " " + (height - pad.bottom) + " L " + pad.left + " " + (height - pad.bottom) + " Z";
+
+    const yLabels = [
+      { val: Math.round(yMax), y: pad.top },
+      { val: Math.round((yMax + yMin) / 2), y: pad.top + ch / 2 },
+      { val: Math.round(yMin), y: pad.top + ch }
+    ];
+
+    const formatTime = (ts: string, isOldest: boolean): string => {
+      const d = new Date(ts);
+      const now = new Date();
+      const mins = (now.getTime() - d.getTime()) / (1000 * 60);
+      const hrs = mins / 60;
+      // For the oldest point, always show relative time even if recent
+      if (isOldest) {
+        if (mins < 1) { return "<1m ago"; }
+        if (mins < 60) { return Math.floor(mins) + "m ago"; }
+        if (hrs < 24) { return Math.floor(hrs) + "h ago"; }
+        return Math.floor(hrs / 24) + "d ago";
+      }
+      // For the newest point, show "now"
+      return "now";
+    };
+
+    let gridLines = "";
+    let yLabelsSvg = "";
+    yLabels.forEach(l => {
+      gridLines += '<line x1="' + pad.left + '" y1="' + l.y + '" x2="' + (width - pad.right) + '" y2="' + l.y + '" stroke="var(--vscode-panel-border)" stroke-dasharray="2,2" opacity="0.5"/>';
+      yLabelsSvg += '<text x="' + (pad.left - 5) + '" y="' + (l.y + 3) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + l.val + '</text>';
+    });
+
+    let circles = "";
+    pts.forEach(p => {
+      circles += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3" fill="var(--vscode-charts-blue)" class="chart-point"/>';
+    });
+
+    return '<div class="snapshot-chart">' +
+      '<div class="chart-title">Premium Interactions Over Time</div>' +
+      '<svg width="' + width + '" height="' + height + '" class="history-chart">' +
+      '<defs><linearGradient id="areaGrad" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.3"/>' +
+      '<stop offset="100%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.05"/>' +
+      '</linearGradient></defs>' +
+      gridLines + yLabelsSvg +
+      '<path d="' + areaPath + '" fill="url(#areaGrad)"/>' +
+      '<path d="' + linePath + '" fill="none" stroke="var(--vscode-charts-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      circles +
+      '<text x="' + pad.left + '" y="' + (height - 5) + '" text-anchor="start" fill="var(--vscode-descriptionForeground)" font-size="9">' + formatTime(snapshots[0].timestamp, true) + '</text>' +
+      '<text x="' + (width - pad.right) + '" y="' + (height - 5) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">now</text>' +
+      '</svg>' +
+      '<div class="chart-footnote">' + count + ' snapshots · Based on local refreshes</div>' +
+      '</div>';
+  }
+
+  private _generateSnapshotHistoryHtml(): string {
+    if (this._snapshotHistory.length < 2) {
+      return "";
+    }
+
+    const comp = this._getSnapshotComparisons();
+
+    let lastRefreshRow = "";
+    if (comp.sinceLastRefresh !== null) {
+      const cls = comp.sinceLastRefresh < 0 ? "negative" : comp.sinceLastRefresh > 0 ? "positive" : "";
+      const val = comp.sinceLastRefresh === 0 ? "No change" : (comp.sinceLastRefresh > 0 ? "+" : "") + comp.sinceLastRefresh + " premium";
+      lastRefreshRow = '<div class="snapshot-row"><span class="snapshot-label">Since last refresh:</span><span class="snapshot-value ' + cls + '">' + val + '</span></div>';
+    }
+
+    let yesterdayRow = "";
+    if (comp.sinceYesterday !== null) {
+      const cls = comp.sinceYesterday < 0 ? "negative" : comp.sinceYesterday > 0 ? "positive" : "";
+      const val = comp.sinceYesterday === 0 ? "No change" : (comp.sinceYesterday > 0 ? "+" : "") + comp.sinceYesterday + " premium";
+      yesterdayRow = '<div class="snapshot-row"><span class="snapshot-label">Since yesterday:</span><span class="snapshot-value ' + cls + '">' + val + '</span></div>';
+    }
+
+    return '<div class="section">' +
+      '<h2 class="section-title">Local Change History</h2>' +
+      '<div class="quota-card">' +
+      '<div class="snapshot-history">' +
+      lastRefreshRow + yesterdayRow +
+      this._generateSnapshotChartHtml() +
+      '</div></div></div>';
   }
 
   private _generateMarkdownSummary(data: CopilotUserData): string {
@@ -1164,6 +1371,59 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					.copy-button .codicon {
 						font-size: 14px;
 					}
+					.snapshot-history {
+						padding: 0;
+					}
+					.snapshot-row {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						margin-bottom: 4px;
+					}
+					.snapshot-label {
+						font-size: 11px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.snapshot-value {
+						font-size: 12px;
+						font-weight: 600;
+					}
+					.snapshot-value.negative {
+						color: var(--vscode-charts-red);
+					}
+					.snapshot-value.positive {
+						color: var(--vscode-charts-green);
+					}
+					.snapshot-chart {
+						margin-top: 10px;
+						padding-top: 8px;
+						border-top: 1px solid var(--vscode-panel-border);
+					}
+					.chart-title {
+						font-size: 11px;
+						font-weight: 600;
+						margin-bottom: 8px;
+						color: var(--vscode-foreground);
+					}
+					.history-chart {
+						width: 100%;
+						height: auto;
+						display: block;
+					}
+					.chart-point {
+						transition: r 0.15s ease;
+						cursor: pointer;
+					}
+					.chart-point:hover {
+						r: 5;
+					}
+					.chart-footnote {
+						font-size: 10px;
+						color: var(--vscode-descriptionForeground);
+						font-style: italic;
+						margin-top: 6px;
+						text-align: center;
+					}
 				</style>
 			</head>
 			<body>
@@ -1178,6 +1438,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       '<p style="color: var(--vscode-descriptionForeground);">No quota data available</p>'
       }
 				</div>
+
+				${this._generateSnapshotHistoryHtml()}
 
 				${summaryCardsHtml}
 

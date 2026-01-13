@@ -1,5 +1,23 @@
 # Change Log
 
+## [2.0.0] - 2026-01-13
+
+### Added
+- **Local Snapshot History**: Track premium interactions over time with automatic snapshot recording
+  - Stores up to 10 local snapshots of premium quota usage
+  - Visual line chart showing premium interactions trend over time
+  - "Since last refresh" comparison showing change from previous data fetch
+  - "Since yesterday" comparison (when 24h+ data available)
+  - Smart filtering: only records snapshots when values change (ignores duplicates and zero values)
+  - Color-coded changes: red for decreases (quota used), green for increases (quota restored/reset)
+  - Positioned prominently after Quotas section for quick visibility
+  - All data stored locally - no external syncing
+  - Clear "Based on local refreshes" disclaimer
+
+### Changed
+- Improved visual hierarchy with snapshot history section in a card layout
+- Enhanced chart formatting with relative time labels (e.g., "2h ago", "1d ago")
+
 ## [1.8.0] - 2026-01-12
 
 ### Added
