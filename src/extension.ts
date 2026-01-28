@@ -563,6 +563,288 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     return result;
   }
 
+  private _getWeightedPrediction(data: CopilotUserData): {
+    predictedDailyUsage: number;
+    confidence: 'low' | 'medium' | 'high';
+    confidenceReason: string;
+    daysUntilExhaustion: number | null;
+    willExhaustBeforeReset: boolean;
+    dataPoints: number;
+  } | null {
+    if (this._snapshotHistory.length < 2) {
+      return null;
+    }
+
+    // Calculate usage between consecutive snapshots
+    const usageData: { usage: number; timestamp: Date }[] = [];
+    
+    for (let i = 0; i < this._snapshotHistory.length - 1; i++) {
+      const current = this._snapshotHistory[i];
+      const previous = this._snapshotHistory[i + 1];
+      
+      const currentTime = new Date(current.timestamp);
+      const previousTime = new Date(previous.timestamp);
+      
+      // Calculate time difference in hours
+      const hoursDiff = (currentTime.getTime() - previousTime.getTime()) / (1000 * 60 * 60);
+      
+      // Only consider if time difference is reasonable (between 1 hour and 72 hours)
+      if (hoursDiff >= 1 && hoursDiff <= 72) {
+        const usage = previous.premium_remaining - current.premium_remaining;
+        
+        // Only include positive usage (actual consumption)
+        if (usage > 0) {
+          // Normalize to daily usage
+          const dailyUsage = (usage / hoursDiff) * 24;
+          usageData.push({ usage: dailyUsage, timestamp: currentTime });
+        }
+      }
+    }
+
+    if (usageData.length === 0) {
+      return null;
+    }
+
+    // Calculate average daily usage from all data points
+    const predictedDailyUsage = usageData.reduce((sum, d) => sum + d.usage, 0) / usageData.length;
+
+    // Determine confidence level based on number of data points
+    let confidence: 'low' | 'medium' | 'high';
+    let confidenceReason: string;
+    const totalDataPoints = usageData.length;
+
+    if (totalDataPoints >= 7) {
+      confidence = 'high';
+      confidenceReason = `Based on ${totalDataPoints} data points from local history`;
+    } else if (totalDataPoints >= 3) {
+      confidence = 'medium';
+      confidenceReason = `Based on ${totalDataPoints} data points from local history`;
+    } else {
+      confidence = 'low';
+      confidenceReason = `Limited data: only ${totalDataPoints} data point${totalDataPoints > 1 ? 's' : ''} available`;
+    }
+
+    // Calculate days until exhaustion
+    const quotaSnapshotsArray = data.quota_snapshots ? Object.values(data.quota_snapshots) : [];
+    const premiumQuota = quotaSnapshotsArray.find((q) => q.quota_id === "premium_interactions");
+    
+    let daysUntilExhaustion: number | null = null;
+    let willExhaustBeforeReset = false;
+
+    if (premiumQuota && !premiumQuota.unlimited && predictedDailyUsage > 0) {
+      daysUntilExhaustion = Math.floor(premiumQuota.remaining / predictedDailyUsage);
+      
+      // Check if it will exhaust before reset
+      const today = new Date();
+      const resetDate = new Date(data.quota_reset_date_utc);
+      const daysUntilReset = (resetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+      
+      willExhaustBeforeReset = daysUntilExhaustion < daysUntilReset;
+    }
+
+    return {
+      predictedDailyUsage: Math.round(predictedDailyUsage),
+      confidence,
+      confidenceReason,
+      daysUntilExhaustion,
+      willExhaustBeforeReset,
+      dataPoints: totalDataPoints
+    };
+  }
+
+  private _getTrendPrediction(): {
+    recentBurnRate: number;
+    overallBurnRate: number;
+    trend: 'accelerating' | 'slowing' | 'stable';
+    trendIndicator: string;
+    dataPoints: number;
+  } | null {
+    if (this._snapshotHistory.length < 3) {
+      return null;
+    }
+
+    // Calculate usage between consecutive snapshots
+    const usageData: { usage: number; timestamp: Date }[] = [];
+    
+    for (let i = 0; i < this._snapshotHistory.length - 1; i++) {
+      const current = this._snapshotHistory[i];
+      const previous = this._snapshotHistory[i + 1];
+      
+      const currentTime = new Date(current.timestamp);
+      const previousTime = new Date(previous.timestamp);
+      
+      const hoursDiff = (currentTime.getTime() - previousTime.getTime()) / (1000 * 60 * 60);
+      
+      if (hoursDiff >= 1 && hoursDiff <= 72) {
+        const usage = previous.premium_remaining - current.premium_remaining;
+        
+        if (usage > 0) {
+          const dailyUsage = (usage / hoursDiff) * 24;
+          usageData.push({ usage: dailyUsage, timestamp: currentTime });
+        }
+      }
+    }
+
+    if (usageData.length < 2) {
+      return null;
+    }
+
+    // Calculate overall average burn rate
+    const overallBurnRate = usageData.reduce((sum, d) => sum + d.usage, 0) / usageData.length;
+    
+    // Calculate recent burn rate (last 50% of data or minimum 2 points)
+    const recentCount = Math.max(2, Math.ceil(usageData.length / 2));
+    const recentData = usageData.slice(0, recentCount);
+    const recentBurnRate = recentData.reduce((sum, d) => sum + d.usage, 0) / recentData.length;
+    
+    // Determine trend
+    const difference = recentBurnRate - overallBurnRate;
+    const percentDiff = overallBurnRate > 0 ? (difference / overallBurnRate) * 100 : 0;
+    
+    let trend: 'accelerating' | 'slowing' | 'stable';
+    let trendIndicator: string;
+    
+    if (Math.abs(percentDiff) < 10) {
+      trend = 'stable';
+      trendIndicator = 'No significant change';
+    } else if (difference > 0) {
+      trend = 'accelerating';
+      trendIndicator = `+${Math.round(Math.abs(percentDiff))}% vs average`;
+    } else {
+      trend = 'slowing';
+      trendIndicator = `-${Math.round(Math.abs(percentDiff))}% vs average`;
+    }
+    
+    return {
+      recentBurnRate: Math.round(recentBurnRate),
+      overallBurnRate: Math.round(overallBurnRate),
+      trend,
+      trendIndicator,
+      dataPoints: usageData.length
+    };
+  }
+
+  private _generateTrendPredictionHtml(): string {
+    const trend = this._getTrendPrediction();
+
+    if (!trend) {
+      return "";
+    }
+
+    const trendStyles = {
+      accelerating: { 
+        color: 'var(--vscode-charts-red)', 
+        icon: '⚡', 
+        label: 'Accelerating',
+        message: 'Recent usage is higher than average'
+      },
+      slowing: { 
+        color: 'var(--vscode-charts-green)', 
+        icon: '🐢', 
+        label: 'Slowing Down',
+        message: 'Recent usage is lower than average'
+      },
+      stable: { 
+        color: 'var(--vscode-charts-blue)', 
+        icon: '📊', 
+        label: 'Stable',
+        message: 'Usage remains consistent'
+      }
+    };
+    
+    const trendInfo = trendStyles[trend.trend];
+
+    return `
+      <div class="section">
+        <h2 class="section-title">Burn Rate Analysis</h2>
+        <div class="quota-card">
+          <div class="prediction-container">
+            <div class="trend-indicator">
+              <span class="trend-icon">${trendInfo.icon}</span>
+              <span class="trend-label" style="color: ${trendInfo.color};">${trendInfo.label}</span>
+            </div>
+            <div class="trend-message">${trendInfo.message}</div>
+            <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+            <div class="prediction-row">
+              <span class="prediction-label">Recent burn rate:</span>
+              <span class="prediction-value">${trend.recentBurnRate} premium/day</span>
+            </div>
+            <div class="prediction-row">
+              <span class="prediction-label">Overall average:</span>
+              <span class="prediction-value">${trend.overallBurnRate} premium/day</span>
+            </div>
+            <div class="prediction-row">
+              <span class="prediction-label">Trend:</span>
+              <span class="prediction-value">${trend.trendIndicator}</span>
+            </div>
+            <div class="prediction-footer">
+              Based on ${trend.dataPoints} measurements from local history
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private _generateWeightedPredictionHtml(data: CopilotUserData): string {
+    const prediction = this._getWeightedPrediction(data);
+
+    if (!prediction) {
+      return "";
+    }
+
+    // Confidence badge styling
+    const confidenceStyles = {
+      low: { color: 'var(--vscode-charts-red)', label: 'Low Accuracy' },
+      medium: { color: 'var(--vscode-charts-yellow)', label: 'Medium Accuracy' },
+      high: { color: 'var(--vscode-charts-green)', label: 'High Accuracy' }
+    };
+    const conf = confidenceStyles[prediction.confidence];
+
+    // Determine if current usage pattern is sustainable
+    const sustainabilityMsg = prediction.willExhaustBeforeReset
+      ? '<span style="color: var(--vscode-charts-red);">⚠️ May exhaust before reset</span>'
+      : '<span style="color: var(--vscode-charts-green);">✓ On track for reset</span>';
+
+    // Exhaustion estimate
+    let exhaustionHtml = '';
+    if (prediction.daysUntilExhaustion !== null) {
+      exhaustionHtml = `
+        <div class="prediction-row">
+          <span class="prediction-label">Est. days until exhausted:</span>
+          <span class="prediction-value">${prediction.daysUntilExhaustion} days</span>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="section">
+        <h2 class="section-title">Weighted Prediction</h2>
+        <div class="quota-card">
+          <div class="prediction-container">
+            <div class="prediction-header">
+              <span class="prediction-title">Predicted Daily Usage</span>
+              <span class="confidence-badge" style="color: ${conf.color};" title="${prediction.confidenceReason}">${conf.label}</span>
+            </div>
+            <div class="prediction-main">
+              <span class="prediction-number">${prediction.predictedDailyUsage}</span>
+              <span class="prediction-unit">premium/day</span>
+            </div>
+            <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+            ${exhaustionHtml}
+            <div class="prediction-row">
+              <span class="prediction-label">Sustainability:</span>
+              <span class="prediction-value">${sustainabilityMsg}</span>
+            </div>
+            <div class="prediction-footer">
+              ${prediction.confidenceReason}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   private _generateSnapshotChartHtml(): string {
     if (this._snapshotHistory.length < 2) {
       return "";
@@ -1424,6 +1706,104 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						margin-top: 6px;
 						text-align: center;
 					}
+					.prediction-container {
+						padding: 0;
+					}
+					.prediction-header {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						margin-bottom: 8px;
+					}
+					.prediction-title {
+						font-size: 12px;
+						font-weight: 600;
+						color: var(--vscode-foreground);
+					}
+					.confidence-badge {
+						font-size: 11px;
+						font-weight: 600;
+						padding: 2px 6px;
+						border-radius: 10px;
+						background-color: var(--vscode-badge-background);
+					}
+					.prediction-main {
+						display: flex;
+						align-items: baseline;
+						gap: 6px;
+						margin-bottom: 10px;
+					}
+					.prediction-number {
+						font-size: 28px;
+						font-weight: 700;
+						color: var(--vscode-charts-blue);
+					}
+					.prediction-unit {
+						font-size: 12px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.prediction-patterns {
+						background-color: var(--vscode-textCodeBlock-background);
+						border-radius: 4px;
+						padding: 8px;
+						margin-bottom: 8px;
+					}
+					.pattern-row {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						margin-bottom: 4px;
+					}
+					.pattern-row:last-child {
+						margin-bottom: 0;
+					}
+					.pattern-label {
+						font-size: 11px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.pattern-value {
+						font-size: 12px;
+						font-weight: 600;
+					}
+					.prediction-row {
+						display: flex;
+						justify-content: space-between;
+						align-items: center;
+						margin-bottom: 4px;
+					}
+					.prediction-label {
+						font-size: 11px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.prediction-value {
+						font-size: 12px;
+						font-weight: 600;
+					}
+					.prediction-footer {
+						font-size: 10px;
+						color: var(--vscode-descriptionForeground);
+						font-style: italic;
+						margin-top: 8px;
+						text-align: center;
+					}
+					.trend-indicator {
+						display: flex;
+						align-items: center;
+						gap: 8px;
+						margin-bottom: 8px;
+					}
+					.trend-icon {
+						font-size: 24px;
+					}
+					.trend-label {
+						font-size: 18px;
+						font-weight: 700;
+					}
+					.trend-message {
+						font-size: 11px;
+						color: var(--vscode-descriptionForeground);
+						margin-bottom: 10px;
+					}
 				</style>
 			</head>
 			<body>
@@ -1440,6 +1820,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 				</div>
 
 				${this._generateSnapshotHistoryHtml()}
+
+				${this._generateWeightedPredictionHtml(data)}
+
+				${this._generateTrendPredictionHtml()}
 
 				${summaryCardsHtml}
 

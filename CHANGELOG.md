@@ -1,5 +1,16 @@
 # Change Log
 
+## [3.0.0] - 2026-01-28
+
+### Added
+- **Weighted Prediction**: Estimates daily premium usage, with confidence level and exhaustion forecast.
+- **Burn Rate Analysis**: Detects if usage is accelerating, slowing, or stable, comparing recent and average burn rates.
+- **Visual Trend Chart**: Enhanced local quota history with a line chart and improved snapshot filtering.
+- **Sidebar & Status Bar Enhancements**: More real-time updates, better configuration handling, and improved error feedback.
+
+### Changed
+- Smarter local quota history: improved filtering and more accurate comparisons.
+- UI/UX refinements and bug fixes for a smoother experience.
 ## [2.0.0] - 2026-01-13
 
 ### Added

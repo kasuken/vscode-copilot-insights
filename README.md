@@ -38,28 +38,32 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 ---
 
 ## Features
+
+- **Weighted Prediction**: Estimates daily premium usage, with confidence level and exhaustion forecast.
+- **Burn Rate Analysis**: Detects if usage is accelerating, slowing, or stable, comparing recent and average burn rates.
+- **Visual Trend Chart**: Enhanced local quota history with a line chart and improved snapshot filtering.
 - **Sidebar (Copilot Insights)**:
-    - Shows your Copilot plan details
-    - Lists organizations where you have Copilot access
-    - **Local Snapshot History**: Track premium interactions over time
-      - Visual line chart showing usage trends across up to 10 snapshots
-      - "Since last refresh" and "Since yesterday" comparisons
-      - Smart filtering to only record meaningful changes
-      - All data stored locally with clear labeling
-    - Displays quota cards with progress bars and pacing guidance
-    - Status badges (🟢 Healthy, 🟡 Watch, 🔴 Risk) based on quota percentage
+		- Shows your Copilot plan details
+		- Lists organizations where you have Copilot access
+		- **Local Snapshot History**: Track premium interactions over time
+			- Visual line chart showing usage trends across up to 10 snapshots
+			- "Since last refresh" and "Since yesterday" comparisons
+			- Smart filtering to only record meaningful changes
+			- All data stored locally with clear labeling
+		- Displays quota cards with progress bars and pacing guidance
+		- Status badges (🟢 Healthy, 🟡 Watch, 🔴 Risk) based on quota percentage
 		- Optional **Quota mood** indicator (😌 / 🙂 / 😬 / 😱) to summarize quota risk at a glance
 		- Micro-copy tooltips on critical fields (e.g. Unlimited, Premium interactions, Reset Date)
-    - **Copy Summary to Clipboard** button for exporting insights as Markdown
-    - Auto-refreshes when the view becomes visible
-    - Manual refresh button in the title bar
-  - **Status bar indicator**:
-    - Compact view of Premium Interactions remaining/total + percentage
-    - **Customizable visual styles**: detailed, progress capsule, circular ring, solid bar, shaded bar, minimalist, or adaptive emoji
-    - **Flexible positioning**: choose left, right, or both sides of the status bar
-    - **Granular display control**: toggle name, numerical quota, and visual indicators independently
-    - Severity icons and status badges based on remaining percentage
-    - Tooltip with status label and reset information
+		- **Copy Summary to Clipboard** button for exporting insights as Markdown
+		- Auto-refreshes when the view becomes visible
+		- Manual refresh button in the title bar
+- **Status bar indicator**:
+		- Compact view of Premium Interactions remaining/total + percentage
+		- **Customizable visual styles**: detailed, progress capsule, circular ring, solid bar, shaded bar, minimalist, or adaptive emoji
+		- **Flexible positioning**: choose left, right, or both sides of the status bar
+		- **Granular display control**: toggle name, numerical quota, and visual indicators independently
+		- Severity icons and status badges based on remaining percentage
+		- Tooltip with status label and reset information
 		- Shows a warning notification once per reset cycle when usage passes 85%
 
 ## Screenshots
