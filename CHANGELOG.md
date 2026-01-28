@@ -11,6 +11,7 @@
 ### Changed
 - Smarter local quota history: improved filtering and more accurate comparisons.
 - UI/UX refinements and bug fixes for a smoother experience.
+
 ## [2.0.0] - 2026-01-13
 
 ### Added
