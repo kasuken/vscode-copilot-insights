@@ -1890,9 +1890,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
     // Build the base text components based on toggles
     const namePart = showName ? "Copilot: " : "";
+    const used = premiumQuota.entitlement - premiumQuota.remaining;
     const quotaPart = showNumericalQuota
       ? (progressBarMode === "used"
-        ? `${percentUsed}/${premiumQuota.entitlement}`
+        ? `${used}/${premiumQuota.entitlement}`
         : `${premiumQuota.remaining}/${premiumQuota.entitlement}`)
       : "";
 
