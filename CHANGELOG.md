@@ -1,5 +1,17 @@
 # Change Log
 
+# [3.5.0] - 2026-02-04
+
+### Added
+- **Quota Usage Breakdown**: See a breakdown of premium usage by day and by organization.
+- **Advanced Error Reporting**: More detailed error messages and troubleshooting tips in the sidebar.
+- **Snapshot Export Improvements**: Export quota snapshots with timestamps for better tracking.
+- **Accessibility Enhancements**: Improved keyboard navigation and screen reader support in the sidebar view.
+
+### Changed
+- UI polish for quota breakdown and error banners.
+- Minor performance improvements for sidebar refresh.
+
 ## [3.0.0] - 2026-01-28
 
 ### Added

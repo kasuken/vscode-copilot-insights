@@ -39,9 +39,6 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 
 ## Features
 
-- **Weighted Prediction**: Estimates daily premium usage, with confidence level and exhaustion forecast.
-- **Burn Rate Analysis**: Detects if usage is accelerating, slowing, or stable, comparing recent and average burn rates.
-- **Visual Trend Chart**: Enhanced local quota history with a line chart and improved snapshot filtering.
 - **Sidebar (Copilot Insights)**:
 		- Shows your Copilot plan details
 		- Lists organizations where you have Copilot access
@@ -57,6 +54,16 @@ Copilot Insights surfaces your GitHub Copilot entitlement/quota information and 
 		- **Copy Summary to Clipboard** button for exporting insights as Markdown
 		- Auto-refreshes when the view becomes visible
 		- Manual refresh button in the title bar
+
+- **Quota Usage Breakdown**: See a breakdown of premium usage by day and by organization.
+- **Advanced Error Reporting**: More detailed error messages and troubleshooting tips in the sidebar.
+- **Snapshot Export Improvements**: Export quota snapshots with timestamps for better tracking.
+- **Accessibility Enhancements**: Improved keyboard navigation and screen reader support in the sidebar view.
+- **Weighted Prediction**: Estimates daily premium usage, with confidence level and exhaustion forecast.
+- **Burn Rate Analysis**: Detects if usage is accelerating, slowing, or stable, comparing recent and average burn rates.
+- **Visual Trend Chart**: Enhanced local quota history with a line chart and improved snapshot filtering.
+
+
 - **Status bar indicator**:
 		- Compact view of Premium Interactions remaining/total + percentage
 		- **Customizable visual styles**: detailed, progress capsule, circular ring, solid bar, shaded bar, minimalist, or adaptive emoji

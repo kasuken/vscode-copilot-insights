@@ -328,10 +328,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         asOfTime
       );
 
+      const isOverQuota = premiumQuota.remaining < 0;
+      const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
+
       this._statusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot Premium Interactions**\n\n` +
         `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
-        `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n` +
+        (isOverQuota
+          ? `• Over by: **${overageAmount}** (${used} of ${premiumQuota.entitlement} used)\n`
+          : `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n`) +
         `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
         `• Plan: **${data.copilot_plan}**\n\n` +
         `_Click to view full details_`
@@ -388,12 +393,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       );
       this._bottomStatusBarItem.text = bottomText;
 
+      const isOverQuota = premiumQuota.remaining < 0;
+      const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
+      const statusBadge = this._getStatusBadge(percentRemaining);
+
       // Set tooltip with detailed information
       this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot Usage**\n\n` +
         `• Used: **${used}** of **${premiumQuota.entitlement}** (${percentUsed}%)\n` +
-        `• Remaining: **${premiumQuota.remaining}** (${percentRemaining}%)\n` +
-        `• Status: **${this._getStatusBadge(percentRemaining).label}** ${this._getStatusBadge(percentRemaining).emoji}\n\n` +
+        (isOverQuota
+          ? `• Over by: **${overageAmount}**\n`
+          : `• Remaining: **${premiumQuota.remaining}** (${percentRemaining}%)\n`) +
+        `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n\n` +
         `_Click to view full details_`
       );
     } else {
@@ -461,7 +472,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _getMood(percentRemaining: number): { emoji: string; text: string } {
-    if (percentRemaining > 75) {
+    if (percentRemaining <= 0) {
+      return { emoji: "💀", text: "Over quota" };
+    } else if (percentRemaining > 75) {
       return { emoji: "😌", text: "Plenty of quota left" };
     } else if (percentRemaining > 40) {
       return { emoji: "🙂", text: "You’re fine" };
@@ -478,7 +491,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     label: string;
     color: string;
   } {
-    if (percentRemaining > 50) {
+    if (percentRemaining <= 0) {
+      return {
+        emoji: "🚫",
+        icon: "$(error)",
+        label: "Over Quota",
+        color: "var(--vscode-charts-red)",
+      };
+    } else if (percentRemaining > 50) {
       return {
         emoji: "🟢",
         icon: "$(pass)",
@@ -1011,17 +1031,26 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           );
           const used = quota.entitlement - quota.remaining;
           const statusBadge = this._getStatusBadge(percentRemaining);
+          const isOverQuota = quota.remaining < 0;
+          const overageAmount = isOverQuota ? Math.abs(quota.remaining) : 0;
 
-          markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (${percentRemaining}% remaining)\n`;
-          markdown += `- **Remaining:** ${quota.remaining}\n`;
+          if (isOverQuota) {
+            markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (exceeded by ${overageAmount})\n`;
+            markdown += `- **Over by:** ${overageAmount}\n`;
+          } else {
+            markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (${percentRemaining}% remaining)\n`;
+            markdown += `- **Remaining:** ${quota.remaining}\n`;
+          }
           markdown += `- **Used:** ${used}\n`;
           markdown += `- **Total:** ${quota.entitlement}\n`;
 
           if (timeUntilReset.totalDays > 0) {
-            const allowedPerDay = Math.floor(
-              quota.remaining / timeUntilReset.totalDays
-            );
-            markdown += `- **To last until reset:** ≤ ${allowedPerDay}/day\n`;
+            if (!isOverQuota) {
+              const allowedPerDay = Math.floor(
+                quota.remaining / timeUntilReset.totalDays
+              );
+              markdown += `- **To last until reset:** ≤ ${allowedPerDay}/day\n`;
+            }
             markdown += `- **Reset in:** ${timeUntilReset.days}d ${timeUntilReset.hours}h\n`;
             markdown += `- **Reset Date:** ${this._formatDate(
               data.quota_reset_date_utc
@@ -1238,6 +1267,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           );
           const statusBadge = this._getStatusBadge(percentRemaining);
           const mood = this._getMood(percentRemaining);
+          const isOverQuota = quota.remaining < 0;
+          const overageAmount = isOverQuota ? Math.abs(quota.remaining) : 0;
 
           // Get progress bar display mode from settings
           const progressBarMode = vscode.workspace
@@ -1245,50 +1276,97 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
             .get<string>("progressBarMode", "remaining");
           const showUsed = progressBarMode === "used";
 
-          // Determine progress bar values based on mode
-          const progressPercent = showUsed ? percentUsed : percentRemaining;
-          const progressLabel = showUsed ? `${percentUsed}% used` : `${percentRemaining}% remaining`;
+          // Determine progress bar values based on mode (clamp to valid range)
+          const clampedPercentUsed = Math.min(percentUsed, 100);
+          const clampedPercentRemaining = Math.max(percentRemaining, 0);
+          const progressPercent = showUsed ? clampedPercentUsed : clampedPercentRemaining;
+          
+          // For the label, show overage info when over quota
+          let progressLabel: string;
+          if (isOverQuota) {
+            progressLabel = `Over by ${overageAmount}`;
+          } else {
+            progressLabel = showUsed ? `${percentUsed}% used` : `${percentRemaining}% remaining`;
+          }
 
           // Determine progress bar color based on usage level (always based on usage for intuitive coloring)
-          const progressBarColor = percentUsed > 80
+          const progressBarColor = isOverQuota || percentUsed > 80
             ? 'var(--vscode-charts-red)'
             : percentUsed > 50
               ? 'var(--vscode-charts-yellow)'
               : 'var(--vscode-charts-green)';
 
-          // Calculate pacing
+          // Calculate pacing - only show recommendations when there's remaining quota
           let pacingHtml = "";
           if (timeUntilReset.totalDays > 0) {
-            const allowedPerDay = Math.floor(
-              quota.remaining / timeUntilReset.totalDays
-            );
+            if (isOverQuota) {
+              // Show overage summary instead of pacing recommendations
+              pacingHtml = `
+						<div class="quota-pacing-highlight" style="border-left: 3px solid var(--vscode-charts-red);">
+							<div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-charts-red);">
+								⚠️ Quota Exceeded
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Amount over the monthly quota">Over by:</span>
+								<span class="pacing-value" style="color: var(--vscode-charts-red);">${overageAmount} requests</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Total usage this period">Total used:</span>
+								<span class="pacing-value">${used} of ${quota.entitlement}</span>
+							</div>
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Time remaining until quota reset">Reset in:</span>
+								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours}h</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Date when your monthly quota resets">Reset Date:</span>
+								<span class="pacing-value">${this._formatDate(data.quota_reset_date_utc)}</span>
+							</div>
+							${quota.overage_permitted ? `
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
+								✓ Overage is permitted for your plan. Requests will continue to work.
+							</div>
+							` : `
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div style="font-size: 11px; color: var(--vscode-charts-red);">
+								✗ Overage is not permitted. Premium features may be limited until reset.
+							</div>
+							`}
+						</div>
+					`;
+            } else {
+              const allowedPerDay = Math.floor(
+                quota.remaining / timeUntilReset.totalDays
+              );
 
-            // Calculate weeks remaining until reset (minimum 1 week)
-            const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
-            const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
+              // Calculate weeks remaining until reset (minimum 1 week)
+              const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
+              const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
 
-            // Calculate working days (Mon-Fri) until reset
-            const workingDays = Math.floor(timeUntilReset.totalDays * (5 / 7)); // Approximate working days
-            const allowedPerWorkDay =
-              workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
+              // Calculate working days (Mon-Fri) until reset
+              const workingDays = Math.floor(timeUntilReset.totalDays * (5 / 7)); // Approximate working days
+              const allowedPerWorkDay =
+                workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
 
-            // Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
-            const totalWorkingHours = workingDays * 8;
-            const allowedPerHour =
-              totalWorkingHours > 0
-                ? Math.floor(quota.remaining / totalWorkingHours)
-                : 0;
+              // Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
+              const totalWorkingHours = workingDays * 8;
+              const allowedPerHour =
+                totalWorkingHours > 0
+                  ? Math.floor(quota.remaining / totalWorkingHours)
+                  : 0;
 
-            // Calculate projections for multipliers
-            const budget033 = Math.floor(
-              quota.remaining / 0.33 / timeUntilReset.totalDays
-            );
-            const budget1 = Math.floor(quota.remaining / timeUntilReset.totalDays);
-            const budget3 = Math.floor(
-              quota.remaining / 3 / timeUntilReset.totalDays
-            );
+              // Calculate projections for multipliers
+              const budget033 = Math.floor(
+                quota.remaining / 0.33 / timeUntilReset.totalDays
+              );
+              const budget1 = Math.floor(quota.remaining / timeUntilReset.totalDays);
+              const budget3 = Math.floor(
+                quota.remaining / 3 / timeUntilReset.totalDays
+              );
 
-            pacingHtml = `
+              pacingHtml = `
 						<div class="quota-pacing-highlight">
 							<div class="pacing-row">
 								<span class="pacing-label" title="Maximum average daily usage to stay within quota">To last until reset:</span>
@@ -1296,14 +1374,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Time remaining until quota reset">Reset in:</span>
-								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours
-              }h</span>
+								<span class="pacing-value">${timeUntilReset.days}d ${timeUntilReset.hours}h</span>
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Date when your monthly quota resets">Reset Date:</span>
-								<span class="pacing-value">${this._formatDate(
-                data.quota_reset_date_utc
-              )}</span>
+								<span class="pacing-value">${this._formatDate(data.quota_reset_date_utc)}</span>
 							</div>
 						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
@@ -1340,6 +1415,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
               </div>
 						</div>
 					`;
+            }
           }
 
           return `
@@ -1361,8 +1437,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 						</div>
 						<div class="quota-stats">
 							<div class="stat">
-								<span class="stat-label" title="Calls available until the reset date">Remaining:</span>
-								<span class="stat-value">${quota.remaining}</span>
+								${isOverQuota
+                ? `<span class="stat-label" title="Amount over your monthly quota" style="color: var(--vscode-charts-red);">Over by:</span>
+								   <span class="stat-value" style="color: var(--vscode-charts-red);">${overageAmount}</span>`
+                : `<span class="stat-label" title="Calls available until the reset date">Remaining:</span>
+								   <span class="stat-value">${quota.remaining}</span>`
+              }
 							</div>
 							<div class="stat">
 								<span class="stat-label" title="Calls made since the last reset">Used:</span>
@@ -1886,14 +1966,24 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     const showNumericalQuota = config.get<boolean>("statusBar.showNumericalQuota", true);
     const showVisualIndicator = config.get<boolean>("statusBar.showVisualIndicator", true);
 
-    const displayPercent = progressBarMode === "used" ? percentUsed : percentRemaining;
+    const isOverQuota = premiumQuota.remaining < 0;
+    const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
+    
+    // Clamp displayPercent for visual components (0-100 range)
+    const rawDisplayPercent = progressBarMode === "used" ? percentUsed : percentRemaining;
+    const displayPercent = Math.max(0, Math.min(100, rawDisplayPercent));
+    
+    // For text display, show "OVER" when over quota
+    const displayPercentText = isOverQuota ? `+${overageAmount}` : `${rawDisplayPercent}%`;
 
     // Build the base text components based on toggles
     const namePart = showName ? "Copilot: " : "";
     const quotaPart = showNumericalQuota
-      ? (progressBarMode === "used"
-        ? `${percentUsed}/${premiumQuota.entitlement}`
-        : `${premiumQuota.remaining}/${premiumQuota.entitlement}`)
+      ? (isOverQuota
+        ? `+${overageAmount}/${premiumQuota.entitlement}`
+        : (progressBarMode === "used"
+          ? `${percentUsed}/${premiumQuota.entitlement}`
+          : `${premiumQuota.remaining}/${premiumQuota.entitlement}`))
       : "";
 
     // If visual indicator is disabled, return only name + quota (no style-specific formatting or percentage)
@@ -1934,7 +2024,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         // Build visual part based on toggle
         const visualPart = showVisualIndicator ? `${progressBar} ` : "";
         const quotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${quotaWithSpace}${visualPart}${displayPercent}%`;
+        return `${statusBadge.icon} ${namePart}${quotaWithSpace}${visualPart}${displayPercentText}`;
 
       case "shaded-bar":
         const graphicBlocks = 5;
@@ -1952,22 +2042,23 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         // Build visual part based on toggle
         const graphicVisualPart = showVisualIndicator ? `${graphicBar} ` : "";
         const graphicQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${graphicQuotaWithSpace}${graphicVisualPart}${displayPercent}%`;
+        return `${statusBadge.icon} ${namePart}${graphicQuotaWithSpace}${graphicVisualPart}${displayPercentText}`;
 
       case "adaptive-emoji":
         let moodEmoji = "😌";
-        if (percentUsed >= 90) { moodEmoji = "😱"; }
+        if (isOverQuota) { moodEmoji = "💀"; }
+        else if (percentUsed >= 90) { moodEmoji = "😱"; }
         else if (percentUsed >= 75) { moodEmoji = "😬"; }
         else if (percentUsed >= 50) { moodEmoji = "🙂"; }
 
         // Build visual part based on toggle
         const emojiVisualPart = showVisualIndicator ? `${moodEmoji} ` : "";
         const emojiQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${emojiQuotaWithSpace}${emojiVisualPart}${displayPercent}%`;
+        return `${statusBadge.icon} ${namePart}${emojiQuotaWithSpace}${emojiVisualPart}${displayPercentText}`;
 
       case "minimalist":
         const miniQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${miniQuotaWithSpace}${displayPercent}%`;
+        return `${statusBadge.icon} ${namePart}${miniQuotaWithSpace}${displayPercentText}`;
 
       case "circular-ring":
         // Use "Large" variants: ◯, ◔, ◑, ◕, ⬤
@@ -1977,19 +2068,19 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         // Build visual part based on toggle
         const ringVisualPart = showVisualIndicator ? `${ringChar} ` : "";
         const ringQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${ringQuotaWithSpace}${ringVisualPart}${displayPercent}%`;
+        return `${statusBadge.icon} ${namePart}${ringQuotaWithSpace}${ringVisualPart}${displayPercentText}`;
 
       case "progress-capsule":
         // Build visual part based on toggle
         const capsuleVisualPart = showVisualIndicator ? "◖ " : "";
         const capsuleEndPart = showVisualIndicator ? " ◗" : "";
         const capsuleQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
-        return `${statusBadge.icon} ${namePart}${capsuleQuotaWithSpace}${capsuleVisualPart}${displayPercent}%${capsuleEndPart}`;
+        return `${statusBadge.icon} ${namePart}${capsuleQuotaWithSpace}${capsuleVisualPart}${displayPercentText}${capsuleEndPart}`;
 
       case "detailed-original":
       default:
         // Build detailed text: name + quota + percentage
-        const percentPart = `(${displayPercent}%)`;
+        const percentPart = `(${displayPercentText})`;
         const detailedQuotaWithSpace = quotaPart ? `${quotaPart} ` : "";
         if (showName || showNumericalQuota) {
           return `${statusBadge.icon} ${namePart}${detailedQuotaWithSpace}${percentPart}`;
