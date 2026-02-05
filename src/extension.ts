@@ -1059,7 +1059,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
           if (quota.overage_permitted) {
             markdown += `- **Overage:** Permitted`;
-            if (quota.overage_count > 0) {
+            if (isOverQuota) {
+              markdown += ` (${overageAmount} over, est. cost: $${(overageAmount * 0.04).toFixed(2)})`;
+            } else if (quota.overage_count > 0) {
               markdown += ` (${quota.overage_count} used)`;
             }
             markdown += `\n`;
@@ -1328,6 +1330,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
 								✓ Overage is permitted for your plan. Requests will continue to work.
 							</div>
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
+								💰 Estimated Overage Cost
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Cost per overage request">Rate:</span>
+								<span class="pacing-value">$0.04/request</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Current overage cost">Current cost:</span>
+								<span class="pacing-value" style="color: var(--vscode-charts-orange);">$${(overageAmount * 0.04).toFixed(2)}</span>
+							</div>
 							` : `
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; color: var(--vscode-charts-red);">
@@ -1458,9 +1472,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
               ? `
 							<div class="quota-overage">
 								<span title="Additional usage allowed beyond standard quota">Overage permitted</span>
-								${quota.overage_count > 0
-                ? `<span class="overage-count">${quota.overage_count} used</span>`
-                : ""
+								${isOverQuota
+                ? `<span class="overage-count" style="color: var(--vscode-charts-orange);" title="Estimated cost at $0.04/request">$${(overageAmount * 0.04).toFixed(2)} est.</span>`
+                : (quota.overage_count > 0
+                  ? `<span class="overage-count">${quota.overage_count} used</span>`
+                  : "")
               }
 							</div>
 						`
