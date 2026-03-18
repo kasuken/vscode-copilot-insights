@@ -112,6 +112,12 @@
           ],
           "description": "Controls how the progress bar displays quota: 'remaining' shows quota left (default), 'used' shows quota consumed."
         },
+        "copilotInsights.pollingIntervalSeconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "description": "Refresh Copilot quota data automatically every N seconds. Set to 0 to disable background polling."
+        },
         "copilotInsights.statusBarLocation": {
           "type": "string",
           "default": "right",

@@ -1,15 +1,23 @@
-import * as assert from 'assert';
+import * as assert from "assert";
 
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
-import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
+import { normalizePollingIntervalSeconds } from "../extension";
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+suite("Extension Test Suite", () => {
+  test("normalizes valid polling intervals", () => {
+    assert.strictEqual(normalizePollingIntervalSeconds(undefined), 60);
+    assert.strictEqual(normalizePollingIntervalSeconds(60), 60);
+    assert.strictEqual(normalizePollingIntervalSeconds(0), 0);
+    assert.strictEqual(normalizePollingIntervalSeconds(-15), 0);
+    assert.strictEqual(normalizePollingIntervalSeconds(1.4), 1);
+    assert.strictEqual(normalizePollingIntervalSeconds(1.6), 2);
+  });
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
-	});
+  test("falls back when the configured interval is invalid", () => {
+    assert.strictEqual(normalizePollingIntervalSeconds(Number.NaN), 60);
+    assert.strictEqual(
+      normalizePollingIntervalSeconds(Number.POSITIVE_INFINITY),
+      60
+    );
+    assert.strictEqual(normalizePollingIntervalSeconds(undefined, 120), 120);
+  });
 });

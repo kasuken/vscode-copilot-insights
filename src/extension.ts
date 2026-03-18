@@ -41,8 +41,28 @@ interface LocalSnapshot {
 
 const SNAPSHOT_HISTORY_KEY = "copilotInsights.snapshotHistory";
 const MAX_SNAPSHOTS = 10;
+const DEFAULT_POLLING_INTERVAL_SECONDS = 60;
 
-class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
+export function normalizePollingIntervalSeconds(
+  value: number | undefined,
+  fallbackSeconds = DEFAULT_POLLING_INTERVAL_SECONDS
+): number {
+  const normalizedFallback = Number.isFinite(fallbackSeconds) && fallbackSeconds > 0
+    ? Math.round(fallbackSeconds)
+    : DEFAULT_POLLING_INTERVAL_SECONDS;
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return normalizedFallback;
+  }
+
+  if (value <= 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round(value));
+}
+
+class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = "copilotInsights.sidebarView";
   private _view?: vscode.WebviewView;
   private _statusBarItem: vscode.StatusBarItem;
@@ -52,6 +72,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlert.resetDate";
   private _snapshotHistory: LocalSnapshot[] = [];
+  private _pollingTimer?: ReturnType<typeof setInterval>;
+  private _isLoadingCopilotData = false;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -85,7 +107,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     this._updateStatusBarVisibility();
 
     // Listen for configuration changes to update the status bar and sidebar in real-time
-    vscode.workspace.onDidChangeConfiguration((event) => {
+    const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       const affectedVisual = event.affectsConfiguration('copilotInsights.statusBarLocation') ||
         event.affectsConfiguration('copilotInsights.statusBarStyle') ||
         event.affectsConfiguration('copilotInsights.progressBarMode') ||
@@ -93,13 +115,27 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('copilotInsights.statusBar.showNumericalQuota') ||
         event.affectsConfiguration('copilotInsights.statusBar.showVisualIndicator') ||
         event.affectsConfiguration('copilotInsights.showMood');
+      const affectedPolling = event.affectsConfiguration(
+        "copilotInsights.pollingIntervalSeconds"
+      );
+
+      if (event.affectsConfiguration("copilotInsights.statusBarLocation")) {
+        this._updateStatusBarVisibility();
+      }
 
       if (affectedVisual && this._lastData) {
         // Update the status bar and sidebar with the cached data
         this._updateStatusBar(this._lastData);
         this._updateWithData(this._lastData);
       }
+
+      if (affectedPolling) {
+        this._restartPolling(true);
+      }
     });
+    this._context.subscriptions.push(configurationChangeDisposable);
+
+    this._restartPolling();
   }
 
   // Getters to access status bar items for disposal
@@ -109,6 +145,48 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
   get bottomStatusBarItem(): vscode.StatusBarItem {
     return this._bottomStatusBarItem;
+  }
+
+  public dispose() {
+    this._clearPollingTimer();
+  }
+
+  private _restartPolling(refreshImmediately = false) {
+    this._clearPollingTimer();
+
+    const pollingIntervalSeconds = this._getPollingIntervalSeconds();
+    if (pollingIntervalSeconds === 0) {
+      return;
+    }
+
+    this._pollingTimer = setInterval(() => {
+      void this.loadCopilotData({ silent: true });
+    }, pollingIntervalSeconds * 1000);
+
+    if (refreshImmediately) {
+      void this.loadCopilotData({ silent: true });
+    }
+  }
+
+  private _clearPollingTimer() {
+    if (this._pollingTimer) {
+      clearInterval(this._pollingTimer);
+      this._pollingTimer = undefined;
+    }
+  }
+
+  private _getPollingIntervalSeconds(): number {
+    const configuredValue = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<number>(
+        "pollingIntervalSeconds",
+        DEFAULT_POLLING_INTERVAL_SECONDS
+      );
+
+    return normalizePollingIntervalSeconds(
+      configuredValue,
+      DEFAULT_POLLING_INTERVAL_SECONDS
+    );
   }
 
   private _updateStatusBarVisibility() {
@@ -185,17 +263,25 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     this.loadCopilotData();
   }
 
-  public async loadCopilotData() {
+  public async loadCopilotData(options: { silent?: boolean } = {}) {
+    if (this._isLoadingCopilotData) {
+      return;
+    }
+
+    this._isLoadingCopilotData = true;
+
     try {
       // Get GitHub authentication session
       const session = await vscode.authentication.getSession(
         "github",
         ["user:email"],
-        { createIfNone: true }
+        { createIfNone: !options.silent }
       );
 
       if (!session) {
-        this._updateWithError("Failed to authenticate with GitHub");
+        if (!options.silent) {
+          this._updateWithError("Failed to authenticate with GitHub");
+        }
         return;
       }
 
@@ -243,10 +329,20 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
+
+      if (options.silent) {
+        console.warn(
+          `Copilot Insights background refresh failed: ${errorMessage}`
+        );
+        return;
+      }
+
       this._updateWithError(errorMessage);
       vscode.window.showErrorMessage(
         `Failed to load Copilot data: ${errorMessage}`
       );
+    } finally {
+      this._isLoadingCopilotData = false;
     }
   }
 
@@ -2139,6 +2235,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.extensionUri,
     context
   );
+  context.subscriptions.push(provider);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       CopilotInsightsViewProvider.viewType,
@@ -2202,6 +2299,11 @@ export function activate(context: vscode.ExtensionContext) {
         await config.update("statusBarStyle", "detailed-original", vscode.ConfigurationTarget.Global);
         await config.update("statusBarLocation", "right", vscode.ConfigurationTarget.Global);
         await config.update("progressBarMode", "remaining", vscode.ConfigurationTarget.Global);
+        await config.update(
+          "pollingIntervalSeconds",
+          DEFAULT_POLLING_INTERVAL_SECONDS,
+          vscode.ConfigurationTarget.Global
+        );
 
         vscode.window.showInformationMessage("Copilot Insights settings reset to defaults.");
         // Refresh the display

@@ -1,5 +1,10 @@
 # Change Log
 
+# [Unreleased]
+
+### Added
+- **Regular Quota Polling**: Copilot quota data can now refresh automatically on a configurable interval so the footer widget stays current without manual refreshes.
+
 # [3.7.3] - 2026-03-16
 
 ### Changed
