@@ -2164,6 +2164,30 @@ export function activate(context: vscode.ExtensionContext) {
   // Trigger initial data load to populate status bars
   provider.loadCopilotData();
 
+  // Set up periodic auto-refresh to keep status bar data up to date
+  const getRefreshIntervalMs = () => {
+    const minutes = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<number>("autoRefreshInterval", 10);
+    return Math.max(1, Math.min(1440, minutes)) * 60 * 1000;
+  };
+
+  let autoRefreshTimer = setInterval(() => {
+    provider.loadCopilotData();
+  }, getRefreshIntervalMs());
+
+  // Re-create timer when the interval setting changes
+  const configWatcher = vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration("copilotInsights.autoRefreshInterval")) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = setInterval(() => {
+        provider.loadCopilotData();
+      }, getRefreshIntervalMs());
+    }
+  });
+
+  context.subscriptions.push({ dispose: () => clearInterval(autoRefreshTimer) }, configWatcher);
+
   // Optional: Register command to refresh the view
   const refreshCommand = vscode.commands.registerCommand(
     "vscode-copilot-insights.refresh",

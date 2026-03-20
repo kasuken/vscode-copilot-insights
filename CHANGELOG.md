@@ -1,5 +1,11 @@
 # Change Log
 
+# [3.7.4] - 2026-03-20
+
+### Added
+- **Automatic Background Refresh**: Copilot data now refreshes periodically after activation so the status bar stays current even when the Insights view is not opened for a while.
+- **Auto Refresh Interval Setting**: Added `copilotInsights.autoRefreshInterval` to control how often Copilot data is refreshed automatically in the background.
+
 # [3.7.3] - 2026-03-16
 
 ### Changed

@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "3.7.3",
+  "version": "3.7.4",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -164,6 +164,13 @@
           "type": "boolean",
           "default": true,
           "description": "Show visual indicator (e.g., progress bars, rings, emojis) in status bar."
+        },
+        "copilotInsights.autoRefreshInterval": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "How often (in minutes) to automatically refresh Copilot data. Set to keep your status bar always up to date. Min: 1, Max: 1440 (24 hours). Default: 10 minutes."
         }
       }
     }
