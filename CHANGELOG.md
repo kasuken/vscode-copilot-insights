@@ -1,5 +1,10 @@
 # Change Log
 
+# [3.8.4] - 2026-03-30
+
+### Added
+- **Disable Status Bar Coloring**: New `copilotInsights.statusBar.enableColoredBackground` setting to turn off the red/yellow background coloring on the status bar item. Useful for users with an overage budget who don't want the toolbar to turn red when standard PRU runs out.
+
 # [3.7.4] - 2026-03-20
 
 ### Added
