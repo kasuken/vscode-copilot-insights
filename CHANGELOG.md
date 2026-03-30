@@ -66,7 +66,7 @@
 
 ### Added
 - **Local Snapshot History**: Track premium interactions over time with automatic snapshot recording
-  - Stores up to 10 local snapshots of premium quota usage
+  - Stores up to 90 local snapshots of premium quota usage
   - Visual line chart showing premium interactions trend over time
   - "Since last refresh" comparison showing change from previous data fetch
   - "Since yesterday" comparison (when 24h+ data available)

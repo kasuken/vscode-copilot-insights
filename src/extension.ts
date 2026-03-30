@@ -40,7 +40,7 @@ interface LocalSnapshot {
 }
 
 const SNAPSHOT_HISTORY_KEY = "copilotInsights.snapshotHistory";
-const MAX_SNAPSHOTS = 10;
+const MAX_SNAPSHOTS = 90;
 
 class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "copilotInsights.sidebarView";
