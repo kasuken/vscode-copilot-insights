@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "3.7.4",
+  "version": "3.8.4",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -164,6 +164,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show visual indicator (e.g., progress bars, rings, emojis) in status bar."
+        },
+        "copilotInsights.statusBar.enableColoredBackground": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable colored background on the status bar item based on remaining quota (red/yellow). Disable this if you have an overage budget and don't want the toolbar to turn red when standard PRU runs out."
         },
         "copilotInsights.autoRefreshInterval": {
           "type": "number",

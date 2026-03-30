@@ -92,6 +92,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('copilotInsights.statusBar.showName') ||
         event.affectsConfiguration('copilotInsights.statusBar.showNumericalQuota') ||
         event.affectsConfiguration('copilotInsights.statusBar.showVisualIndicator') ||
+        event.affectsConfiguration('copilotInsights.statusBar.enableColoredBackground') ||
         event.affectsConfiguration('copilotInsights.showMood');
 
       if (affectedVisual && this._lastData) {
@@ -495,10 +496,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     label: string;
     color: string;
   } {
+    const enableColoring = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<boolean>("statusBar.enableColoredBackground", true);
+
     if (percentRemaining <= 0) {
       return {
         emoji: "🚫",
-        icon: "$(error)",
+        icon: enableColoring ? "$(error)" : "$(circle-slash)",
         label: "Over Quota",
         color: "var(--vscode-charts-red)",
       };
@@ -512,14 +517,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     } else if (percentRemaining >= 20) {
       return {
         emoji: "🟡",
-        icon: "$(warning)",
+        icon: enableColoring ? "$(warning)" : "$(info)",
         label: "Watch",
         color: "var(--vscode-charts-yellow)",
       };
     } else {
       return {
         emoji: "🔴",
-        icon: "$(error)",
+        icon: enableColoring ? "$(error)" : "$(alert)",
         label: "Risk",
         color: "var(--vscode-charts-red)",
       };
