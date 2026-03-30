@@ -1,5 +1,10 @@
 # Change Log
 
+# [3.8.5] - 2026-03-31
+
+### Changed
+- **Increased Snapshot History**: Local snapshot history now stores up to 90 snapshots (previously 10) for richer trend and prediction data.
+
 # [3.8.4] - 2026-03-30
 
 ### Added
