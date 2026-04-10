@@ -40,6 +40,9 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "extensionKind": [
+    "ui"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -112,6 +115,12 @@
           ],
           "description": "Controls how the progress bar displays quota: 'remaining' shows quota left (default), 'used' shows quota consumed."
         },
+        "copilotInsights.pollingIntervalSeconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "description": "Refresh Copilot quota data automatically every N seconds. Set to 0 to disable background polling."
+        },
         "copilotInsights.statusBarLocation": {
           "type": "string",
           "default": "right",
@@ -169,13 +178,6 @@
           "type": "boolean",
           "default": true,
           "description": "Enable colored background on the status bar item based on remaining quota (red/yellow). Disable this if you have an overage budget and don't want the toolbar to turn red when standard PRU runs out."
-        },
-        "copilotInsights.autoRefreshInterval": {
-          "type": "number",
-          "default": 10,
-          "minimum": 1,
-          "maximum": 1440,
-          "description": "How often (in minutes) to automatically refresh Copilot data. Set to keep your status bar always up to date. Min: 1, Max: 1440 (24 hours). Default: 10 minutes."
         }
       }
     }
@@ -190,13 +192,13 @@
     "test-vsix": "vsce package && code --install-extension ./vscode-copilot-insights-*.vsix"
   },
   "devDependencies": {
-    "@types/vscode": "^1.107.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "typescript-eslint": "^8.48.1",
+    "@types/node": "^22.19.17",
+    "@types/vscode": "^1.107.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.1",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.48.1"
   }
 }
