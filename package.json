@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "3.8.5",
+  "version": "3.8.6",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -39,6 +39,9 @@
   ],
   "activationEvents": [
     "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -111,6 +114,12 @@
             "Show used quota (bar fills as you use requests)"
           ],
           "description": "Controls how the progress bar displays quota: 'remaining' shows quota left (default), 'used' shows quota consumed."
+        },
+        "copilotInsights.pollingIntervalSeconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "description": "Refresh Copilot quota data automatically every N seconds. Set to 0 to disable background polling."
         },
         "copilotInsights.statusBarLocation": {
           "type": "string",
@@ -197,13 +206,13 @@
     "test-vsix": "vsce package && code --install-extension ./vscode-copilot-insights-*.vsix"
   },
   "devDependencies": {
-    "@types/vscode": "^1.107.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "typescript-eslint": "^8.48.1",
+    "@types/node": "^22.19.17",
+    "@types/vscode": "^1.107.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.1",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.48.1"
   }
 }
