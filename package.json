@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "3.8.5",
+  "version": "3.8.6",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {

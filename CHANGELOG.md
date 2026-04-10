@@ -1,5 +1,19 @@
 # Change Log
 
+# [3.8.6] - 2026-04-10
+
+### Added
+- **Configurable Polling Interval (Seconds)**: Added `copilotInsights.pollingIntervalSeconds` to control background refresh cadence in seconds, with `0` to disable polling.
+
+### Changed
+- **Silent Background Refresh**: Background polling now refreshes data without auth prompts or error toasts.
+- **Polling Lifecycle Management**: Polling timer is now managed by the view provider and restarts when polling settings change.
+- **Extension Kind**: Declared extension runtime kind as `ui`.
+
+### Fixed
+- **No Overlapping Fetches**: Prevented concurrent refresh requests during background polling.
+- **Reset to Defaults Coverage**: "Reset to Defaults" now restores `copilotInsights.pollingIntervalSeconds` to its default value.
+
 # [3.8.5] - 2026-03-31
 
 ### Changed
