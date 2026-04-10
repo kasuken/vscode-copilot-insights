@@ -1,5 +1,17 @@
 # Change Log
 
+# [3.8.7] - 2026-04-10
+
+### Added
+- **Custom Premium Limit Setting**: Added `copilotInsights.customPremiumLimit` so you can define a higher monthly premium request budget (for example, when overage is enabled).
+
+### Changed
+- **Effective Quota Calculations**: Premium quota cards, percentages, pacing guidance, and usage indicators now honor the configured custom premium limit when it is higher than the plan entitlement.
+- **Configuration Reactivity**: Sidebar and status bar visuals now refresh when `copilotInsights.customPremiumLimit` changes.
+
+### Fixed
+- **Reset to Defaults Coverage**: "Reset to Defaults" now also resets `copilotInsights.customPremiumLimit` to `0`.
+
 # [3.8.6] - 2026-04-10
 
 ### Added
