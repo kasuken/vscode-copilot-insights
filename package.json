@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "3.8.6",
+  "version": "3.8.7",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -178,6 +178,20 @@
           "type": "boolean",
           "default": true,
           "description": "Enable colored background on the status bar item based on remaining quota (red/yellow). Disable this if you have an overage budget and don't want the toolbar to turn red when standard PRU runs out."
+        },
+        "copilotInsights.autoRefreshInterval": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "How often (in minutes) to automatically refresh Copilot data. Set to keep your status bar always up to date. Min: 1, Max: 1440 (24 hours). Default: 10 minutes."
+        },
+        "copilotInsights.customPremiumLimit": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Set a custom premium request limit higher than your plan's built-in entitlement (e.g., 500 instead of 300). When set to a value greater than your plan entitlement, progress bars, percentages, pacing, and alerts will track against this custom limit instead. Useful if you have overage enabled and want to budget a specific number of total requests per month. Set to 0 to use your plan's default entitlement."
         }
       }
     }
