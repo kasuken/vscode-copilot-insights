@@ -47,8 +47,29 @@ interface LocalSnapshot {
 
 const SNAPSHOT_HISTORY_KEY = "copilotInsights.snapshotHistory";
 const MAX_SNAPSHOTS = 90;
+const OVERAGE_COST_PER_REQUEST = 0.04;
+const DEFAULT_POLLING_INTERVAL_SECONDS = 60;
 
-class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
+export function normalizePollingIntervalSeconds(
+  value: number | undefined,
+  fallbackSeconds = DEFAULT_POLLING_INTERVAL_SECONDS
+): number {
+  const normalizedFallback = Number.isFinite(fallbackSeconds) && fallbackSeconds > 0
+    ? Math.round(fallbackSeconds)
+    : DEFAULT_POLLING_INTERVAL_SECONDS;
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return normalizedFallback;
+  }
+
+  if (value <= 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round(value));
+}
+
+class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = "copilotInsights.sidebarView";
   private _view?: vscode.WebviewView;
   private _statusBarItem: vscode.StatusBarItem;
@@ -58,6 +79,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlert.resetDate";
   private _snapshotHistory: LocalSnapshot[] = [];
+  private _pollingTimer?: ReturnType<typeof setInterval>;
+  private _isLoadingCopilotData = false;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -91,7 +114,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     this._updateStatusBarVisibility();
 
     // Listen for configuration changes to update the status bar and sidebar in real-time
-    vscode.workspace.onDidChangeConfiguration((event) => {
+    const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       const affectedVisual = event.affectsConfiguration('copilotInsights.statusBarLocation') ||
         event.affectsConfiguration('copilotInsights.statusBarStyle') ||
         event.affectsConfiguration('copilotInsights.progressBarMode') ||
@@ -99,14 +122,30 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('copilotInsights.statusBar.showNumericalQuota') ||
         event.affectsConfiguration('copilotInsights.statusBar.showVisualIndicator') ||
         event.affectsConfiguration('copilotInsights.statusBar.enableColoredBackground') ||
+        event.affectsConfiguration('copilotInsights.showMood') ||
+        event.affectsConfiguration('copilotInsights.customPremiumLimit');
         event.affectsConfiguration('copilotInsights.showMood');
+      const affectedPolling = event.affectsConfiguration(
+        "copilotInsights.pollingIntervalSeconds"
+      );
+
+      if (event.affectsConfiguration("copilotInsights.statusBarLocation")) {
+        this._updateStatusBarVisibility();
+      }
 
       if (affectedVisual && this._lastData) {
         // Update the status bar and sidebar with the cached data
         this._updateStatusBar(this._lastData);
         this._updateWithData(this._lastData);
       }
+
+      if (affectedPolling) {
+        this._restartPolling(true);
+      }
     });
+    this._context.subscriptions.push(configurationChangeDisposable);
+
+    this._restartPolling();
   }
 
   // Getters to access status bar items for disposal
@@ -116,6 +155,48 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 
   get bottomStatusBarItem(): vscode.StatusBarItem {
     return this._bottomStatusBarItem;
+  }
+
+  public dispose() {
+    this._clearPollingTimer();
+  }
+
+  private _restartPolling(refreshImmediately = false) {
+    this._clearPollingTimer();
+
+    const pollingIntervalSeconds = this._getPollingIntervalSeconds();
+    if (pollingIntervalSeconds === 0) {
+      return;
+    }
+
+    this._pollingTimer = setInterval(() => {
+      void this.loadCopilotData({ silent: true });
+    }, pollingIntervalSeconds * 1000);
+
+    if (refreshImmediately) {
+      void this.loadCopilotData({ silent: true });
+    }
+  }
+
+  private _clearPollingTimer() {
+    if (this._pollingTimer) {
+      clearInterval(this._pollingTimer);
+      this._pollingTimer = undefined;
+    }
+  }
+
+  private _getPollingIntervalSeconds(): number {
+    const configuredValue = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<number>(
+        "pollingIntervalSeconds",
+        DEFAULT_POLLING_INTERVAL_SECONDS
+      );
+
+    return normalizePollingIntervalSeconds(
+      configuredValue,
+      DEFAULT_POLLING_INTERVAL_SECONDS
+    );
   }
 
   private _updateStatusBarVisibility() {
@@ -192,17 +273,25 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     this.loadCopilotData();
   }
 
-  public async loadCopilotData() {
+  public async loadCopilotData(options: { silent?: boolean } = {}) {
+    if (this._isLoadingCopilotData) {
+      return;
+    }
+
+    this._isLoadingCopilotData = true;
+
     try {
       // Get GitHub authentication session
       const session = await vscode.authentication.getSession(
         "github",
         ["user:email"],
-        { createIfNone: true }
+        { createIfNone: !options.silent }
       );
 
       if (!session) {
-        this._updateWithError("Failed to authenticate with GitHub");
+        if (!options.silent) {
+          this._updateWithError("Failed to authenticate with GitHub");
+        }
         return;
       }
 
@@ -248,6 +337,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       const quotaArr = data.quota_snapshots ? Object.values(data.quota_snapshots) : [];
       const premiumQ = quotaArr.find((q) => q.quota_id === "premium_interactions");
       if (premiumQ && !premiumQ.unlimited) {
+        // Store raw API values — effective quota is applied at display time only
         this._addSnapshot(premiumQ.remaining, premiumQ.entitlement);
       }
 
@@ -256,10 +346,20 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
+
+      if (options.silent) {
+        console.warn(
+          `Copilot Insights background refresh failed: ${errorMessage}`
+        );
+        return;
+      }
+
       this._updateWithError(errorMessage);
       vscode.window.showErrorMessage(
         `Failed to load Copilot data: ${errorMessage}`
       );
+    } finally {
+      this._isLoadingCopilotData = false;
     }
   }
 
@@ -314,10 +414,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     );
 
     if (premiumQuota && !premiumQuota.unlimited) {
-      const percentRemaining = parseFloat(((premiumQuota.quota_remaining / premiumQuota.entitlement) * 100).toFixed(1));
-      const used = premiumQuota.entitlement - premiumQuota.quota_remaining;
-      const percentUsed = parseFloat(((used / premiumQuota.entitlement) * 100).toFixed(1));
-      const statusBadge = this._getStatusBadge(percentRemaining);
+      const eq = this._getEffectiveQuota(premiumQuota);
+      const { used, isOverQuota, percentRemaining, percentUsed, overageAmount, statusBadge } = this._computeQuotaStats(eq);
+      const hasCustomLimit = eq.entitlement > premiumQuota.entitlement;
+      const customLimitNote = hasCustomLimit ? `\n• Custom limit: **${eq.entitlement}** (plan: ${premiumQuota.entitlement})` : '';
 
       // Get the configured style and toggles
       const config = vscode.workspace.getConfiguration("copilotInsights");
@@ -334,10 +434,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       }
 
       // Format the text based on the selected style
-      const rightSideText = this._formatStatusBarText(style, percentRemaining, percentUsed, premiumQuota, statusBadge);
+      const rightSideText = this._formatStatusBarText(style, percentRemaining, percentUsed, eq, statusBadge);
       this._statusBarItem.text = rightSideText;
 
-      // Update tooltip for right side
       // Calculate days until reset
       const latestSnapshot = quotaSnapshotsArray[0];
       const asOfTime =
@@ -347,104 +446,62 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         asOfTime
       );
 
-      const isOverQuota = premiumQuota.remaining < 0;
-      const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
-
+      // Right status bar tooltip
       this._statusBarItem.tooltip = new vscode.MarkdownString(
         `**GitHub Copilot Premium Interactions**\n\n` +
         `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
         (isOverQuota
-          ? `• Over by: **${overageAmount}** (${used} of ${premiumQuota.entitlement} used)\n`
-          : `• Remaining: **${premiumQuota.remaining}** of **${premiumQuota.entitlement}** (${percentRemaining}%)\n`) +
+          ? `• Over by: **${overageAmount}** (${used} of ${eq.entitlement} used)\n`
+          : `• Remaining: **${eq.remaining}** of **${eq.entitlement}** (${percentRemaining}%)\n`) +
         `• Reset in: **${timeUntilReset.days}d ${timeUntilReset.hours}h**\n` +
-        `• Plan: **${data.copilot_plan}**\n\n` +
+        `• Plan: **${data.copilot_plan}**` +
+        customLimitNote + `\n\n` +
         `_Click to view full details_`
       );
 
-      this._maybeNotifyPremiumUsage(data, premiumQuota, percentUsed);
+      // Bottom status bar (reuses the same effective quota — no redundant computation)
+      const bottomText = this._formatStatusBarText(style, percentRemaining, percentUsed, eq, statusBadge);
+      this._bottomStatusBarItem.text = bottomText;
+      this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
+        `**GitHub Copilot Usage**\n\n` +
+        `• Used: **${used}** of **${eq.entitlement}** (${percentUsed}%)\n` +
+        (isOverQuota
+          ? `• Over by: **${overageAmount}**\n`
+          : `• Remaining: **${eq.remaining}** (${percentRemaining}%)\n`) +
+        `• Status: **${statusBadge.label}** ${statusBadge.emoji}` +
+        customLimitNote + `\n\n` +
+        `_Click to view full details_`
+      );
+
+      this._maybeNotifyPremiumUsage(data, eq, premiumQuota.entitlement, percentUsed);
     } else {
       // For unlimited plans
       this._statusBarItem.text = "$(check) Copilot";
       this._bottomStatusBarItem.text = "$(check) Copilot";
 
-      this._statusBarItem.tooltip = new vscode.MarkdownString(
+      const unlimitedTooltip = new vscode.MarkdownString(
         `**GitHub Copilot**\n\n` +
         `• Plan: **${data.copilot_plan}**\n` +
         `• Premium Interactions: **Unlimited**\n\n` +
         `_Click to view full details_`
       );
-      this._bottomStatusBarItem.tooltip = this._statusBarItem.tooltip;
-    }
-
-    // Update the bottom status bar as well
-    this._updateBottomStatusBar(data);
-  }
-
-  private _updateBottomStatusBar(data: CopilotUserData) {
-    // Find premium interactions quota
-    const quotaSnapshotsArray = data.quota_snapshots
-      ? Object.values(data.quota_snapshots)
-      : [];
-
-    const premiumQuota = quotaSnapshotsArray.find(
-      (q) => q.quota_id === "premium_interactions"
-    );
-
-    if (premiumQuota && !premiumQuota.unlimited) {
-      const percentRemaining = parseFloat(((premiumQuota.quota_remaining / premiumQuota.entitlement) * 100).toFixed(1));
-      const used = premiumQuota.entitlement - premiumQuota.quota_remaining;
-      const percentUsed = parseFloat(((used / premiumQuota.entitlement) * 100).toFixed(1));
-
-      // Get the configured style
-      const style = vscode.workspace
-        .getConfiguration("copilotInsights")
-        .get<string>("statusBarStyle", "textual");
-
-      // Format the text based on the selected style (using same formatting as right side)
-      const bottomText = this._formatStatusBarText(
-        style,
-        percentRemaining,
-        percentUsed,
-        premiumQuota,
-        this._getStatusBadge(percentRemaining)
-      );
-      this._bottomStatusBarItem.text = bottomText;
-
-      const isOverQuota = premiumQuota.remaining < 0;
-      const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
-      const statusBadge = this._getStatusBadge(percentRemaining);
-
-      // Set tooltip with detailed information
-      this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
-        `**GitHub Copilot Usage**\n\n` +
-        `• Used: **${used}** of **${premiumQuota.entitlement}** (${percentUsed}%)\n` +
-        (isOverQuota
-          ? `• Over by: **${overageAmount}**\n`
-          : `• Remaining: **${premiumQuota.remaining}** (${percentRemaining}%)\n`) +
-        `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n\n` +
-        `_Click to view full details_`
-      );
-    } else {
-      // For unlimited plans - use same icon as right side
-      this._bottomStatusBarItem.text = "$(check) Copilot";
-
-      this._bottomStatusBarItem.tooltip = new vscode.MarkdownString(
-        `**GitHub Copilot Usage**\n\n` +
-        `• Plan: **${data.copilot_plan || "Unknown"}**\n` +
-        `• Status: **Unlimited**\n\n` +
-        `_Click to view full details_`
-      );
+      this._statusBarItem.tooltip = unlimitedTooltip;
+      this._bottomStatusBarItem.tooltip = unlimitedTooltip;
     }
   }
 
   private _maybeNotifyPremiumUsage(
     data: CopilotUserData,
-    premiumQuota: QuotaSnapshot,
+    effectiveQuota: QuotaSnapshot,
+    planEntitlement: number,
     percentUsed: number
   ) {
-    if (!premiumQuota?.entitlement || premiumQuota.unlimited) {
+    if (!effectiveQuota?.entitlement || effectiveQuota.unlimited) {
       return;
     }
+
+    const hasCustomLimit = effectiveQuota.entitlement > planEntitlement;
+    const quotaLabel = hasCustomLimit ? "custom limit" : "monthly quota";
 
     const resetDate = data.quota_reset_date_utc || "";
     const lastNotifiedReset = this._context.globalState.get<string>(
@@ -457,7 +514,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     ) {
       vscode.window
         .showWarningMessage(
-          `Copilot Premium requests are at ${percentUsed}% of your monthly quota.`,
+          `Copilot Premium requests are at ${percentUsed}% of your ${quotaLabel}.`,
           "Open details"
         )
         .then((selection) => {
@@ -473,6 +530,44 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     ) {
       this._context.globalState.update(this._premiumUsageAlertKey, undefined);
     }
+  }
+
+  /**
+   * Returns effective quota values, applying the custom premium limit if configured.
+   * When a custom limit is set above the plan entitlement, `remaining` and `quota_remaining`
+   * are both set to the same effective value (custom limit - used). In the raw API,
+   * `remaining` can go negative (for overage tracking) while `quota_remaining` stays at 0,
+   * but under a custom limit both represent distance from the custom cap.
+   *
+   * @param customLimit Optional pre-read config value to avoid repeated config lookups in loops.
+   */
+  private _getEffectiveQuota(quota: QuotaSnapshot, customLimit?: number): QuotaSnapshot {
+    const limit = customLimit ?? vscode.workspace.getConfiguration('copilotInsights').get<number>('customPremiumLimit', 0);
+    const planEntitlement = quota.entitlement;
+    const used = Math.max(0, planEntitlement - quota.quota_remaining);
+
+    if (limit > planEntitlement) {
+      const effectiveRemaining = limit - used;
+      return {
+        ...quota,
+        entitlement: limit,
+        remaining: effectiveRemaining,
+        quota_remaining: effectiveRemaining,
+      };
+    }
+
+    return quota;
+  }
+
+  /** Computes display stats from an effective quota snapshot. */
+  private _computeQuotaStats(eq: QuotaSnapshot) {
+    const used = eq.entitlement - eq.quota_remaining;
+    const isOverQuota = eq.remaining < 0;
+    const percentRemaining = parseFloat(((eq.quota_remaining / eq.entitlement) * 100).toFixed(1));
+    const percentUsed = parseFloat(((used / eq.entitlement) * 100).toFixed(1));
+    const overageAmount = isOverQuota ? Math.abs(eq.remaining) : 0;
+    const statusBadge = this._getStatusBadge(percentRemaining);
+    return { used, isOverQuota, percentRemaining, percentUsed, overageAmount, statusBadge };
   }
 
   private _calculateDaysUntilReset(
@@ -544,8 +639,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _addSnapshot(premiumRemaining: number, premiumEntitlement: number): void {
-    // Don't add snapshots with 0 or invalid values
-    if (premiumRemaining <= 0) {
+    // Don't add snapshots with invalid entitlement values
+    if (premiumEntitlement <= 0) {
       return;
     }
 
@@ -673,7 +768,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     let willExhaustBeforeReset = false;
 
     if (premiumQuota && !premiumQuota.unlimited && predictedDailyUsage > 0) {
-      daysUntilExhaustion = Math.floor(premiumQuota.remaining / predictedDailyUsage);
+      const effectiveQ = this._getEffectiveQuota(premiumQuota);
+      daysUntilExhaustion = Math.floor(effectiveQ.remaining / predictedDailyUsage);
       
       // Check if it will exhaust before reset
       const today = new Date();
@@ -891,8 +987,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       return "";
     }
 
-    // Filter out snapshots with 0 value (invalid/initial entries)
-    const validSnapshots = this._snapshotHistory.filter(s => s.premium_remaining > 0);
+    // Filter out snapshots with invalid entitlement (keep negative remaining for overage tracking)
+    const validSnapshots = this._snapshotHistory.filter(s => s.premium_entitlement > 0);
     if (validSnapshots.length < 2) {
       return "";
     }
@@ -911,7 +1007,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     const maxV = Math.max(...vals);
     const range = maxV - minV || 1;
 
-    const yMin = Math.max(0, minV - range * 0.1);
+    const yMin = minV - range * 0.1;
     const yMax = maxV + range * 0.1;
     const yRange = yMax - yMin || 1;
 
@@ -1050,28 +1146,24 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
         if (quota.unlimited) {
           markdown += `- **Status:** Unlimited ∞\n\n`;
         } else {
-          const percentRemaining = Math.round(
-            (quota.remaining / quota.entitlement) * 100
-          );
-          const used = quota.entitlement - quota.remaining;
-          const statusBadge = this._getStatusBadge(percentRemaining);
-          const isOverQuota = quota.remaining < 0;
-          const overageAmount = isOverQuota ? Math.abs(quota.remaining) : 0;
+          // Apply custom premium limit if configured (only for premium_interactions)
+          const effectiveQ = quota.quota_id === "premium_interactions" ? this._getEffectiveQuota(quota) : quota;
+          const { used, isOverQuota, percentRemaining, overageAmount, statusBadge } = this._computeQuotaStats(effectiveQ);
 
           if (isOverQuota) {
             markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (exceeded by ${overageAmount})\n`;
             markdown += `- **Over by:** ${overageAmount}\n`;
           } else {
             markdown += `- **Status:** ${statusBadge.emoji} ${statusBadge.label} (${percentRemaining}% remaining)\n`;
-            markdown += `- **Remaining:** ${quota.remaining}\n`;
+            markdown += `- **Remaining:** ${effectiveQ.remaining}\n`;
           }
           markdown += `- **Used:** ${used}\n`;
-          markdown += `- **Total:** ${quota.entitlement}\n`;
+          markdown += `- **Total:** ${effectiveQ.entitlement}\n`;
 
           if (timeUntilReset.totalDays > 0) {
             if (!isOverQuota) {
               const allowedPerDay = Math.floor(
-                quota.remaining / timeUntilReset.totalDays
+                effectiveQ.remaining / timeUntilReset.totalDays
               );
               markdown += `- **To last until reset:** ≤ ${allowedPerDay}/day\n`;
             }
@@ -1084,7 +1176,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           if (quota.overage_permitted) {
             markdown += `- **Overage:** Permitted`;
             if (isOverQuota) {
-              markdown += ` (${overageAmount} over, est. cost: $${(overageAmount * 0.04).toFixed(2)})`;
+              const billableOverage = Math.max(0, used - quota.entitlement);
+              markdown += ` (${billableOverage} billable, est. cost: $${(billableOverage * OVERAGE_COST_PER_REQUEST).toFixed(2)})`;
             } else if (quota.overage_count > 0) {
               markdown += ` (${quota.overage_count} used)`;
             }
@@ -1273,6 +1366,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 		`;
 
     // Generate quotas HTML
+    const customLimitConfig = vscode.workspace.getConfiguration('copilotInsights').get<number>('customPremiumLimit', 0);
     let quotasHtml = "";
     if (quotaSnapshotsArray.length > 0) {
       // Sort so Premium Interactions appears first
@@ -1304,14 +1398,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					`;
           }
 
-          const used = quota.entitlement - quota.quota_remaining;
-          const percentUsed = parseFloat(((used / quota.entitlement) * 100).toFixed(1));
-          const percentRemaining = parseFloat(((quota.quota_remaining / quota.entitlement) * 100).toFixed(1));
+          // Apply custom premium limit if configured (only for premium_interactions)
+          const effectiveQ = quota.quota_id === "premium_interactions"
+            ? this._getEffectiveQuota(quota, customLimitConfig)
+            : quota;
+          const { used, isOverQuota, percentRemaining, percentUsed, overageAmount, statusBadge } = this._computeQuotaStats(effectiveQ);
+          const effectiveEntitlement = effectiveQ.entitlement;
+          const effectiveRemaining = effectiveQ.remaining;
           const fmtQuota = (n: number): string => String(parseFloat(n.toFixed(2)));
-          const statusBadge = this._getStatusBadge(percentRemaining);
           const mood = this._getMood(percentRemaining);
-          const isOverQuota = quota.remaining < 0;
-          const overageAmount = isOverQuota ? Math.abs(quota.remaining) : 0;
 
           // Get progress bar display mode from settings
           const progressBarMode = vscode.workspace
@@ -1344,18 +1439,35 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
           if (timeUntilReset.totalDays > 0) {
             if (isOverQuota) {
               // Show overage summary instead of pacing recommendations
+              const planEntitlementOver = quota.entitlement;
+              const hasCustomLimitOver = effectiveEntitlement > planEntitlementOver;
+              const overageRequestsOver = Math.max(0, used - planEntitlementOver);
+              const currentCostOver = overageRequestsOver * OVERAGE_COST_PER_REQUEST;
+
               pacingHtml = `
 						<div class="quota-pacing-highlight" style="border-left: 3px solid var(--vscode-charts-red);">
 							<div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-charts-red);">
-								⚠️ Quota Exceeded
+								⚠️ ${hasCustomLimitOver ? 'Custom Limit' : 'Quota'} Exceeded
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Amount over the monthly quota">Over by:</span>
+								<span class="pacing-label" title="Amount over the ${hasCustomLimitOver ? 'custom limit of ' + effectiveEntitlement : 'monthly quota of ' + planEntitlementOver}">Over ${hasCustomLimitOver ? 'limit' : 'quota'} by:</span>
 								<span class="pacing-value" style="color: var(--vscode-charts-red);">${overageAmount} requests</span>
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Total usage this period">Total used:</span>
-								<span class="pacing-value">${used} of ${quota.entitlement}</span>
+								<span class="pacing-value">${used} of ${effectiveEntitlement}${hasCustomLimitOver ? ' (plan: ' + planEntitlementOver + ')' : ''}</span>
+							</div>
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							<div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
+								💰 Estimated Cost
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Requests beyond your plan's built-in ${planEntitlementOver} entitlement (billed at $${OVERAGE_COST_PER_REQUEST}/req)">Billable overage:</span>
+								<span class="pacing-value">${overageRequestsOver} beyond plan (${planEntitlementOver})</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Current estimated cost at $${OVERAGE_COST_PER_REQUEST}/request">Current cost:</span>
+								<span class="pacing-value" style="color: var(--vscode-charts-orange);">$${currentCostOver.toFixed(2)}</span>
 							</div>
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div class="pacing-row">
@@ -1371,18 +1483,6 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
 								✓ Overage is permitted for your plan. Requests will continue to work.
 							</div>
-							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
-							<div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
-								💰 Estimated Overage Cost
-							</div>
-							<div class="pacing-row">
-								<span class="pacing-label" title="Cost per overage request">Rate:</span>
-								<span class="pacing-value">$0.04/request</span>
-							</div>
-							<div class="pacing-row">
-								<span class="pacing-label" title="Current overage cost">Current cost:</span>
-								<span class="pacing-value" style="color: var(--vscode-charts-orange);">$${(overageAmount * 0.04).toFixed(2)}</span>
-							</div>
 							` : `
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; color: var(--vscode-charts-red);">
@@ -1393,36 +1493,62 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					`;
             } else {
               const allowedPerDay = Math.floor(
-                quota.remaining / timeUntilReset.totalDays
+                effectiveRemaining / timeUntilReset.totalDays
               );
 
               // Calculate weeks remaining until reset (minimum 1 week)
               const weeksRemaining = Math.max(1, timeUntilReset.totalDays / 7);
-              const allowedPerWeek = Math.floor(quota.remaining / weeksRemaining);
+              const allowedPerWeek = Math.floor(effectiveRemaining / weeksRemaining);
 
               // Calculate working days (Mon-Fri) until reset
               const workingDays = Math.floor(timeUntilReset.totalDays * (5 / 7)); // Approximate working days
               const allowedPerWorkDay =
-                workingDays > 0 ? Math.floor(quota.remaining / workingDays) : 0;
+                workingDays > 0 ? Math.floor(effectiveRemaining / workingDays) : 0;
 
               // Calculate working hours (Mon-Fri, 9 AM - 5 PM = 8 hours/day)
               const totalWorkingHours = workingDays * 8;
               const allowedPerHour =
                 totalWorkingHours > 0
-                  ? Math.floor(quota.remaining / totalWorkingHours)
+                  ? Math.floor(effectiveRemaining / totalWorkingHours)
                   : 0;
 
               // Calculate projections for multipliers
               const budget033 = Math.floor(
-                quota.remaining / 0.33 / timeUntilReset.totalDays
+                effectiveRemaining / 0.33 / timeUntilReset.totalDays
               );
-              const budget1 = Math.floor(quota.remaining / timeUntilReset.totalDays);
+              const budget1 = Math.floor(effectiveRemaining / timeUntilReset.totalDays);
               const budget3 = Math.floor(
-                quota.remaining / 3 / timeUntilReset.totalDays
+                effectiveRemaining / 3 / timeUntilReset.totalDays
               );
+
+              // Show estimated cost when custom limit exceeds plan entitlement
+              const planEntitlement = quota.entitlement;
+              const hasCustomLimit = effectiveEntitlement > planEntitlement;
+              const overageRequests = Math.max(0, used - planEntitlement);
+              const currentCost = overageRequests * OVERAGE_COST_PER_REQUEST;
+              const maxOverageRequests = effectiveEntitlement - planEntitlement;
+              const budgetCost = maxOverageRequests * OVERAGE_COST_PER_REQUEST;
 
               pacingHtml = `
 						<div class="quota-pacing-highlight">
+							${hasCustomLimit ? `
+							<div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
+								💰 Estimated Cost (limit: ${effectiveEntitlement}, plan: ${planEntitlement})
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Requests beyond your plan's built-in ${planEntitlement} entitlement">Overage requests:</span>
+								<span class="pacing-value">${overageRequests} of ${maxOverageRequests}</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Current estimated cost at $${OVERAGE_COST_PER_REQUEST}/request">Current cost:</span>
+								<span class="pacing-value" style="color: ${currentCost > 0 ? 'var(--vscode-charts-orange)' : 'var(--vscode-foreground)'};">$${currentCost.toFixed(2)}</span>
+							</div>
+							<div class="pacing-row">
+								<span class="pacing-label" title="Maximum cost if you use all ${effectiveEntitlement} requests">Budget cap:</span>
+								<span class="pacing-value">$${budgetCost.toFixed(2)}</span>
+							</div>
+							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+							` : ''}
 							<div class="pacing-row">
 								<span class="pacing-label" title="Maximum average daily usage to stay within quota">To last until reset:</span>
 								<span class="pacing-value">≤ ${allowedPerDay}/day</span>
@@ -1496,7 +1622,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
                 ? `<span class="stat-label" title="Amount over your monthly quota" style="color: var(--vscode-charts-red);">Over by:</span>
 								   <span class="stat-value" style="color: var(--vscode-charts-red);">${overageAmount}</span>`
                 : `<span class="stat-label" title="Calls available until the reset date">Remaining:</span>
-								   <span class="stat-value">${fmtQuota(quota.quota_remaining)}</span>`
+								   <span class="stat-value">${fmtQuota(effectiveRemaining)}</span>`
               }
 							</div>
 							<div class="stat">
@@ -1505,7 +1631,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							</div>
 							<div class="stat">
 								<span class="stat-label" title="Total calls allowed in this period">Total:</span>
-								<span class="stat-value">${quota.entitlement}</span>
+								<span class="stat-value">${effectiveEntitlement}</span>
 							</div>
 						</div>
 						${pacingHtml}
@@ -1514,7 +1640,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div class="quota-overage">
 								<span title="Additional usage allowed beyond standard quota">Overage permitted</span>
 								${isOverQuota
-                ? `<span class="overage-count" style="color: var(--vscode-charts-orange);" title="Estimated cost at $0.04/request">$${(overageAmount * 0.04).toFixed(2)} est.</span>`
+                ? `<span class="overage-count" style="color: var(--vscode-charts-orange);" title="Estimated cost: ${Math.max(0, used - quota.entitlement)} requests beyond plan at $${OVERAGE_COST_PER_REQUEST}/request">$${(Math.max(0, used - quota.entitlement) * OVERAGE_COST_PER_REQUEST).toFixed(2)} est.</span>`
                 : (quota.overage_count > 0
                   ? `<span class="overage-count">${quota.overage_count} used</span>`
                   : "")
@@ -2183,6 +2309,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.extensionUri,
     context
   );
+  context.subscriptions.push(provider);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       CopilotInsightsViewProvider.viewType,
@@ -2207,30 +2334,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Trigger initial data load to populate status bars
   provider.loadCopilotData();
-
-  // Set up periodic auto-refresh to keep status bar data up to date
-  const getRefreshIntervalMs = () => {
-    const minutes = vscode.workspace
-      .getConfiguration("copilotInsights")
-      .get<number>("autoRefreshInterval", 10);
-    return Math.max(1, Math.min(1440, minutes)) * 60 * 1000;
-  };
-
-  let autoRefreshTimer = setInterval(() => {
-    provider.loadCopilotData();
-  }, getRefreshIntervalMs());
-
-  // Re-create timer when the interval setting changes
-  const configWatcher = vscode.workspace.onDidChangeConfiguration((event) => {
-    if (event.affectsConfiguration("copilotInsights.autoRefreshInterval")) {
-      clearInterval(autoRefreshTimer);
-      autoRefreshTimer = setInterval(() => {
-        provider.loadCopilotData();
-      }, getRefreshIntervalMs());
-    }
-  });
-
-  context.subscriptions.push({ dispose: () => clearInterval(autoRefreshTimer) }, configWatcher);
 
   // Optional: Register command to refresh the view
   const refreshCommand = vscode.commands.registerCommand(
@@ -2270,6 +2373,12 @@ export function activate(context: vscode.ExtensionContext) {
         await config.update("statusBarStyle", "detailed-original", vscode.ConfigurationTarget.Global);
         await config.update("statusBarLocation", "right", vscode.ConfigurationTarget.Global);
         await config.update("progressBarMode", "remaining", vscode.ConfigurationTarget.Global);
+        await config.update("customPremiumLimit", 0, vscode.ConfigurationTarget.Global);
+        await config.update(
+          "pollingIntervalSeconds",
+          DEFAULT_POLLING_INTERVAL_SECONDS,
+          vscode.ConfigurationTarget.Global
+        );
 
         vscode.window.showInformationMessage("Copilot Insights settings reset to defaults.");
         // Refresh the display

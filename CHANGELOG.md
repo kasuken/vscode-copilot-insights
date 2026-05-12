@@ -8,6 +8,33 @@
 - **Copilotignore & Restricted Telemetry**: Access Details now surfaces `.copilotignore` support and restricted telemetry status.
 - **Clipboard & Markdown Export**: Plan details export now includes CLI, MCP, and Preview Features status.
 
+# [3.8.7] - 2026-04-10
+
+### Added
+- **Custom Premium Limit Setting**: Added `copilotInsights.customPremiumLimit` so you can define a higher monthly premium request budget (for example, when overage is enabled).
+
+### Changed
+- **Effective Quota Calculations**: Premium quota cards, percentages, pacing guidance, and usage indicators now honor the configured custom premium limit when it is higher than the plan entitlement.
+- **Configuration Reactivity**: Sidebar and status bar visuals now refresh when `copilotInsights.customPremiumLimit` changes.
+
+### Fixed
+- **Reset to Defaults Coverage**: "Reset to Defaults" now also resets `copilotInsights.customPremiumLimit` to `0`.
+
+# [3.8.6] - 2026-04-10
+
+### Added
+- **Configurable Polling Interval (Seconds)**: Added `copilotInsights.pollingIntervalSeconds` to control background refresh cadence in seconds, with `0` to disable polling.
+
+### Changed
+- **Silent Background Refresh**: Background polling now refreshes data without auth prompts or error toasts.
+- **Polling Lifecycle Management**: Polling timer is now managed by the view provider and restarts when polling settings change.
+- **Extension Kind**: Declared extension runtime kind as `ui`.
+
+### Fixed
+- **No Overlapping Fetches**: Prevented concurrent refresh requests during background polling.
+- **Reset to Defaults Coverage**: "Reset to Defaults" now restores `copilotInsights.pollingIntervalSeconds` to its default value.
+>>>>>>> 4a78246992891eec50a9dbfda381c935340d5ae0
+
 # [3.8.5] - 2026-03-31
 
 ### Changed

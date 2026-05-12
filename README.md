@@ -39,7 +39,7 @@ It focuses on operational visibility, not team analytics. The extension helps an
 - Weighted prediction and burn-rate analysis for premium interactions.
 - Status bar indicator with configurable placement, style, and content.
 - One-click export to clipboard as Markdown or raw JSON.
-- Auto-refresh when the Insights view becomes visible, plus manual refresh and settings actions.
+- Configurable background polling, plus auto-refresh when the Insights view becomes visible.
 - Fractional precision for premium usage values and percentages so displayed numbers better match Copilot reporting.
 
 ## Screenshots
@@ -105,7 +105,7 @@ You can also package and install locally from a VSIX during development.
 2. Open the Copilot Insights icon in the VS Code activity bar.
 3. Sign in with GitHub if VS Code prompts for authentication.
 4. Review your plan details, quotas, and reset timing.
-5. Use the refresh button in the view title bar whenever you want a fresh snapshot.
+5. Leave background polling enabled for automatic updates, or use the refresh button whenever you want an immediate snapshot.
 
 ## Commands
 
@@ -121,6 +121,7 @@ Key settings:
 
 - `copilotInsights.showMood`: Show a mood indicator instead of the standard health status.
 - `copilotInsights.progressBarMode`: Choose `remaining` or `used` for quota bars.
+- `copilotInsights.pollingIntervalSeconds`: Refresh Copilot quota data automatically every `N` seconds. Set to `0` to disable polling.
 - `copilotInsights.statusBarLocation`: Choose `left`, `right`, or `both`.
 - `copilotInsights.statusBarStyle`: Select the status bar visual style.
 - `copilotInsights.statusBar.showName`: Toggle the `Copilot:` label.
@@ -131,6 +132,7 @@ Example:
 
 ```json
 {
+  "copilotInsights.pollingIntervalSeconds": 60,
   "copilotInsights.progressBarMode": "remaining",
   "copilotInsights.statusBarLocation": "right",
   "copilotInsights.statusBarStyle": "detailed-original"
