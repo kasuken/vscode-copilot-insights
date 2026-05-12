@@ -20,8 +20,14 @@ interface QuotaSnapshot {
 }
 
 interface CopilotUserData {
+  login: string;
   copilot_plan: string;
   chat_enabled: boolean;
+  cli_enabled: boolean;
+  is_mcp_enabled: boolean;
+  editor_preview_features_enabled: boolean;
+  copilotignore_enabled: boolean;
+  restricted_telemetry: boolean;
   access_type_sku: string;
   assigned_date: string;
   organization_list: Organization[];
@@ -221,8 +227,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
       const apiData = (await response.json()) as Partial<CopilotUserData>;
       const data: CopilotUserData = {
         ...apiData,
+        login: apiData.login ?? "",
         copilot_plan: this._normalizeCopilotPlan(apiData.copilot_plan),
         chat_enabled: Boolean(apiData.chat_enabled),
+        cli_enabled: Boolean(apiData.cli_enabled),
+        is_mcp_enabled: Boolean(apiData.is_mcp_enabled),
+        editor_preview_features_enabled: Boolean(apiData.editor_preview_features_enabled),
+        copilotignore_enabled: Boolean(apiData.copilotignore_enabled),
+        restricted_telemetry: Boolean(apiData.restricted_telemetry),
         access_type_sku: apiData.access_type_sku ?? "",
         assigned_date: apiData.assigned_date ?? "",
         organization_list: apiData.organization_list ?? [],
@@ -1019,6 +1031,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
     markdown += `## Plan Details\n\n`;
     markdown += `- **Plan:** ${data.copilot_plan || "Unknown"}\n`;
     markdown += `- **Chat:** ${data.chat_enabled ? "Enabled" : "Disabled"}\n`;
+    markdown += `- **CLI:** ${data.cli_enabled ? "Enabled" : "Disabled"}\n`;
+    markdown += `- **MCP:** ${data.is_mcp_enabled ? "Enabled" : "Disabled"}\n`;
+    markdown += `- **Preview Features:** ${data.editor_preview_features_enabled ? "Enabled" : "Disabled"}\n`;
     markdown += `- **Access/SKU:** ${data.access_type_sku || "Unknown"}\n`;
     markdown += `- **Assigned:** ${this._formatDate(data.assigned_date)}\n\n`;
 
@@ -1236,6 +1251,18 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					<div class="summary-card">
 						<div class="card-label" title="Access to Copilot Chat features">Chat</div>
 						<div class="card-value">${data.chat_enabled ? "Enabled" : "Disabled"}</div>
+					</div>
+					<div class="summary-card">
+						<div class="card-label" title="Access to Copilot CLI features">CLI</div>
+						<div class="card-value">${data.cli_enabled ? "Enabled" : "Disabled"}</div>
+					</div>
+					<div class="summary-card">
+						<div class="card-label" title="Model Context Protocol support">MCP</div>
+						<div class="card-value">${data.is_mcp_enabled ? "Enabled" : "Disabled"}</div>
+					</div>
+					<div class="summary-card">
+						<div class="card-label" title="Editor preview features access">Preview</div>
+						<div class="card-value">${data.editor_preview_features_enabled ? "Enabled" : "Disabled"}</div>
 					</div>
 					<div class="summary-card">
 						<div class="card-label" title="Organizations providing your Copilot seat">Orgs</div>
@@ -1943,6 +1970,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 					<h2 class="section-title">Access Details</h2>
 					<div class="quota-card">
 						<div class="quota-stats">
+							${data.login ? `<div class="stat">
+								<span class="stat-label" title="Your GitHub login">Login</span>
+								<span class="stat-value">${data.login}</span>
+							</div>` : ""}
 							<div class="stat">
 								<span class="stat-label" title="The specific SKU or access type of your subscription">SKU/Access</span>
 								<span class="stat-value">${data.access_type_sku || "Unknown"}</span>
@@ -1950,6 +1981,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider {
 							<div class="stat">
 								<span class="stat-label" title="Date when this seat was assigned to you">Assigned</span>
 								<span class="stat-value">${this._formatDate(data.assigned_date)}</span>
+							</div>
+							<div class="stat">
+								<span class="stat-label" title="Whether .copilotignore is supported">.copilotignore</span>
+								<span class="stat-value">${data.copilotignore_enabled ? "Enabled" : "Disabled"}</span>
+							</div>
+							<div class="stat">
+								<span class="stat-label" title="Whether telemetry is restricted for your organization">Restricted Telemetry</span>
+								<span class="stat-value">${data.restricted_telemetry ? "Yes" : "No"}</span>
 							</div>
 						</div>
 					</div>

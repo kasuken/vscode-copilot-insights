@@ -1,5 +1,13 @@
 # Change Log
 
+# [3.9.0] - 2026-05-12
+
+### Added
+- **Extended Plan Details**: New summary cards for CLI, MCP, and Preview Features status in the Insights sidebar for a more complete view of your Copilot capabilities.
+- **GitHub Login Display**: Your GitHub login is now shown in the Access Details section.
+- **Copilotignore & Restricted Telemetry**: Access Details now surfaces `.copilotignore` support and restricted telemetry status.
+- **Clipboard & Markdown Export**: Plan details export now includes CLI, MCP, and Preview Features status.
+
 # [3.8.5] - 2026-03-31
 
 ### Changed
