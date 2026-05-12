@@ -8,18 +8,6 @@
   See your GitHub Copilot plan, quotas, reset window, and premium usage trends directly inside VS Code.
 </p>
 
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
-    <img src="https://img.shields.io/visual-studio-marketplace/v/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code&label=VS%20Marketplace" alt="Visual Studio Marketplace Version" />
-  </a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
-    <img src="https://img.shields.io/visual-studio-marketplace/d/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code" alt="Downloads" />
-  </a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=emanuelebartolesi.vscode-copilot-insights">
-    <img src="https://img.shields.io/visual-studio-marketplace/r/emanuelebartolesi.vscode-copilot-insights?style=for-the-badge&logo=visual-studio-code" alt="Rating" />
-  </a>
-</p>
-
 ## Overview
 
 Copilot Insights gives you a fast, local view of the quota and entitlement data already associated with your GitHub Copilot account.
