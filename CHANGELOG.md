@@ -1,5 +1,13 @@
 # Change Log
 
+# [4.0.0] - 2026-06-01
+
+### Changed
+- **AI Credits Billing Model**: GitHub moved from "Premium Requests" to "AI Credits". The extension now uses AI Credits terminology everywhere (status bar, tooltips, sidebar, pacing, predictions, and exports).
+- **Credit Cost**: Estimated overage cost now uses 1 AI credit = $0.01 USD (previously $0.04 per premium request).
+- **Setting Renamed**: `copilotInsights.customPremiumLimit` is now `copilotInsights.customCreditLimit`. Existing values are migrated automatically on first launch.
+- **API Fields**: Added support for the new `token_based_billing` flag and `analytics_tracking_id` field returned by the Copilot user endpoint.
+
 # [3.9.0] - 2026-05-12
 
 ### Added

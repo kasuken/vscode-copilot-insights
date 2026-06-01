@@ -17,6 +17,9 @@ interface QuotaSnapshot {
   unlimited: boolean;
   overage_permitted: boolean;
   overage_count: number;
+  has_quota?: boolean;
+  quota_reset_at?: number;
+  token_based_billing?: boolean;
 }
 
 interface CopilotUserData {
@@ -36,7 +39,8 @@ interface CopilotUserData {
   };
   quota_reset_date_utc: string;
   quota_reset_date: string;
-  tracking_id?: string;
+  token_based_billing?: boolean;
+  analytics_tracking_id?: string;
 }
 
 interface LocalSnapshot {
@@ -47,7 +51,8 @@ interface LocalSnapshot {
 
 const SNAPSHOT_HISTORY_KEY = "copilotInsights.snapshotHistory";
 const MAX_SNAPSHOTS = 90;
-const OVERAGE_COST_PER_REQUEST = 0.04;
+// Under GitHub's AI Credits billing model, 1 AI credit costs $0.01 USD.
+const CREDIT_COST_USD = 0.01;
 const DEFAULT_POLLING_INTERVAL_SECONDS = 60;
 
 export function normalizePollingIntervalSeconds(
@@ -123,8 +128,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
         event.affectsConfiguration('copilotInsights.statusBar.showVisualIndicator') ||
         event.affectsConfiguration('copilotInsights.statusBar.enableColoredBackground') ||
         event.affectsConfiguration('copilotInsights.showMood') ||
-        event.affectsConfiguration('copilotInsights.customPremiumLimit');
-        event.affectsConfiguration('copilotInsights.showMood');
+        event.affectsConfiguration('copilotInsights.customCreditLimit');
       const affectedPolling = event.affectsConfiguration(
         "copilotInsights.pollingIntervalSeconds"
       );
@@ -330,7 +334,8 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
         quota_snapshots: apiData.quota_snapshots ?? {},
         quota_reset_date_utc: apiData.quota_reset_date_utc ?? "",
         quota_reset_date: apiData.quota_reset_date ?? "",
-        tracking_id: apiData.tracking_id,
+        token_based_billing: Boolean(apiData.token_based_billing),
+        analytics_tracking_id: apiData.analytics_tracking_id,
       };
 
       // Record snapshot for history tracking
@@ -448,7 +453,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 
       // Right status bar tooltip
       this._statusBarItem.tooltip = new vscode.MarkdownString(
-        `**GitHub Copilot Premium Interactions**\n\n` +
+        `**GitHub Copilot AI Credits**\n\n` +
         `• Status: **${statusBadge.label}** ${statusBadge.emoji}\n` +
         (isOverQuota
           ? `• Over by: **${overageAmount}** (${used} of ${eq.entitlement} used)\n`
@@ -482,7 +487,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       const unlimitedTooltip = new vscode.MarkdownString(
         `**GitHub Copilot**\n\n` +
         `• Plan: **${data.copilot_plan}**\n` +
-        `• Premium Interactions: **Unlimited**\n\n` +
+        `• AI Credits: **Unlimited**\n\n` +
         `_Click to view full details_`
       );
       this._statusBarItem.tooltip = unlimitedTooltip;
@@ -514,7 +519,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     ) {
       vscode.window
         .showWarningMessage(
-          `Copilot Premium requests are at ${percentUsed}% of your ${quotaLabel}.`,
+          `Copilot AI Credits are at ${percentUsed}% of your ${quotaLabel}.`,
           "Open details"
         )
         .then((selection) => {
@@ -533,7 +538,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
   }
 
   /**
-   * Returns effective quota values, applying the custom premium limit if configured.
+   * Returns effective quota values, applying the custom AI credit limit if configured.
    * When a custom limit is set above the plan entitlement, `remaining` and `quota_remaining`
    * are both set to the same effective value (custom limit - used). In the raw API,
    * `remaining` can go negative (for overage tracking) while `quota_remaining` stays at 0,
@@ -542,7 +547,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
    * @param customLimit Optional pre-read config value to avoid repeated config lookups in loops.
    */
   private _getEffectiveQuota(quota: QuotaSnapshot, customLimit?: number): QuotaSnapshot {
-    const limit = customLimit ?? vscode.workspace.getConfiguration('copilotInsights').get<number>('customPremiumLimit', 0);
+    const limit = customLimit ?? vscode.workspace.getConfiguration('copilotInsights').get<number>('customCreditLimit', 0);
     const planEntitlement = quota.entitlement;
     const used = Math.max(0, planEntitlement - quota.quota_remaining);
 
@@ -904,11 +909,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
             <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
             <div class="prediction-row">
               <span class="prediction-label">Recent burn rate:</span>
-              <span class="prediction-value">${trend.recentBurnRate} premium/day</span>
+              <span class="prediction-value">${trend.recentBurnRate} credits/day</span>
             </div>
             <div class="prediction-row">
               <span class="prediction-label">Overall average:</span>
-              <span class="prediction-value">${trend.overallBurnRate} premium/day</span>
+              <span class="prediction-value">${trend.overallBurnRate} credits/day</span>
             </div>
             <div class="prediction-row">
               <span class="prediction-label">Trend:</span>
@@ -965,7 +970,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
             </div>
             <div class="prediction-main">
               <span class="prediction-number">${prediction.predictedDailyUsage}</span>
-              <span class="prediction-unit">premium/day</span>
+              <span class="prediction-unit">credits/day</span>
             </div>
             <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
             ${exhaustionHtml}
@@ -1060,7 +1065,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     });
 
     return '<div class="snapshot-chart">' +
-      '<div class="chart-title">Premium Interactions Over Time</div>' +
+      '<div class="chart-title">AI Credits Over Time</div>' +
       '<svg width="' + width + '" height="' + height + '" class="history-chart">' +
       '<defs><linearGradient id="areaGrad" x1="0%" y1="0%" x2="0%" y2="100%">' +
       '<stop offset="0%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.3"/>' +
@@ -1087,14 +1092,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     let lastRefreshRow = "";
     if (comp.sinceLastRefresh !== null) {
       const cls = comp.sinceLastRefresh < 0 ? "negative" : comp.sinceLastRefresh > 0 ? "positive" : "";
-      const val = comp.sinceLastRefresh === 0 ? "No change" : (comp.sinceLastRefresh > 0 ? "+" : "") + comp.sinceLastRefresh + " premium";
+      const val = comp.sinceLastRefresh === 0 ? "No change" : (comp.sinceLastRefresh > 0 ? "+" : "") + comp.sinceLastRefresh + " credits";
       lastRefreshRow = '<div class="snapshot-row"><span class="snapshot-label">Since last refresh:</span><span class="snapshot-value ' + cls + '">' + val + '</span></div>';
     }
 
     let yesterdayRow = "";
     if (comp.sinceYesterday !== null) {
       const cls = comp.sinceYesterday < 0 ? "negative" : comp.sinceYesterday > 0 ? "positive" : "";
-      const val = comp.sinceYesterday === 0 ? "No change" : (comp.sinceYesterday > 0 ? "+" : "") + comp.sinceYesterday + " premium";
+      const val = comp.sinceYesterday === 0 ? "No change" : (comp.sinceYesterday > 0 ? "+" : "") + comp.sinceYesterday + " credits";
       yesterdayRow = '<div class="snapshot-row"><span class="snapshot-label">Since yesterday:</span><span class="snapshot-value ' + cls + '">' + val + '</span></div>';
     }
 
@@ -1105,6 +1110,20 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       lastRefreshRow + yesterdayRow +
       this._generateSnapshotChartHtml() +
       '</div></div></div>';
+  }
+
+  /**
+   * Returns a user-facing display name for a quota.
+   * The `premium_interactions` quota now represents AI Credits under GitHub's
+   * token-based billing model.
+   */
+  private _formatQuotaName(quotaId: string): string {
+    if (quotaId === "premium_interactions") {
+      return "AI Credits";
+    }
+    return quotaId
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (l) => l.toUpperCase());
   }
 
   private _generateMarkdownSummary(data: CopilotUserData): string {
@@ -1137,16 +1156,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     if (quotaSnapshotsArray.length > 0) {
       markdown += `## Quotas\n\n`;
       quotaSnapshotsArray.forEach((quota) => {
-        const quotaName = quota.quota_id
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
+        const quotaName = this._formatQuotaName(quota.quota_id);
 
         markdown += `### ${quotaName}\n\n`;
 
         if (quota.unlimited) {
           markdown += `- **Status:** Unlimited ∞\n\n`;
         } else {
-          // Apply custom premium limit if configured (only for premium_interactions)
+          // Apply custom AI credit limit if configured (only for premium_interactions)
           const effectiveQ = quota.quota_id === "premium_interactions" ? this._getEffectiveQuota(quota) : quota;
           const { used, isOverQuota, percentRemaining, overageAmount, statusBadge } = this._computeQuotaStats(effectiveQ);
 
@@ -1177,7 +1194,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
             markdown += `- **Overage:** Permitted`;
             if (isOverQuota) {
               const billableOverage = Math.max(0, used - quota.entitlement);
-              markdown += ` (${billableOverage} billable, est. cost: $${(billableOverage * OVERAGE_COST_PER_REQUEST).toFixed(2)})`;
+              markdown += ` (${billableOverage} billable, est. cost: $${(billableOverage * CREDIT_COST_USD).toFixed(2)})`;
             } else if (quota.overage_count > 0) {
               markdown += ` (${quota.overage_count} used)`;
             }
@@ -1366,10 +1383,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 		`;
 
     // Generate quotas HTML
-    const customLimitConfig = vscode.workspace.getConfiguration('copilotInsights').get<number>('customPremiumLimit', 0);
+    const customLimitConfig = vscode.workspace.getConfiguration('copilotInsights').get<number>('customCreditLimit', 0);
     let quotasHtml = "";
     if (quotaSnapshotsArray.length > 0) {
-      // Sort so Premium Interactions appears first
+      // Sort so AI Credits appears first
       const sortedQuotas = [...quotaSnapshotsArray].sort((a, b) => {
         if (a.quota_id === "premium_interactions") { return -1; }
         if (b.quota_id === "premium_interactions") { return 1; }
@@ -1377,14 +1394,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       });
       quotasHtml = sortedQuotas
         .map((quota) => {
-          const quotaName = quota.quota_id
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, (l) => l.toUpperCase());
+          const quotaName = this._formatQuotaName(quota.quota_id);
 
           let quotaTooltip = "";
           if (quota.quota_id === "premium_interactions") {
             quotaTooltip =
-              "Premium interactions are limited requests for advanced Copilot models.";
+              "AI credits are consumed by Copilot features. Different models consume credits at different rates.";
           }
 
           if (quota.unlimited) {
@@ -1398,7 +1413,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 					`;
           }
 
-          // Apply custom premium limit if configured (only for premium_interactions)
+          // Apply custom AI credit limit if configured (only for premium_interactions)
           const effectiveQ = quota.quota_id === "premium_interactions"
             ? this._getEffectiveQuota(quota, customLimitConfig)
             : quota;
@@ -1442,7 +1457,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
               const planEntitlementOver = quota.entitlement;
               const hasCustomLimitOver = effectiveEntitlement > planEntitlementOver;
               const overageRequestsOver = Math.max(0, used - planEntitlementOver);
-              const currentCostOver = overageRequestsOver * OVERAGE_COST_PER_REQUEST;
+              const currentCostOver = overageRequestsOver * CREDIT_COST_USD;
 
               pacingHtml = `
 						<div class="quota-pacing-highlight" style="border-left: 3px solid var(--vscode-charts-red);">
@@ -1451,7 +1466,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Amount over the ${hasCustomLimitOver ? 'custom limit of ' + effectiveEntitlement : 'monthly quota of ' + planEntitlementOver}">Over ${hasCustomLimitOver ? 'limit' : 'quota'} by:</span>
-								<span class="pacing-value" style="color: var(--vscode-charts-red);">${overageAmount} requests</span>
+								<span class="pacing-value" style="color: var(--vscode-charts-red);">${overageAmount} credits</span>
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Total usage this period">Total used:</span>
@@ -1462,11 +1477,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 								💰 Estimated Cost
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Requests beyond your plan's built-in ${planEntitlementOver} entitlement (billed at $${OVERAGE_COST_PER_REQUEST}/req)">Billable overage:</span>
+								<span class="pacing-label" title="Credits beyond your plan's built-in ${planEntitlementOver} entitlement (billed at $${CREDIT_COST_USD}/credit)">Billable overage:</span>
 								<span class="pacing-value">${overageRequestsOver} beyond plan (${planEntitlementOver})</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Current estimated cost at $${OVERAGE_COST_PER_REQUEST}/request">Current cost:</span>
+								<span class="pacing-label" title="Current estimated cost at $${CREDIT_COST_USD}/credit">Current cost:</span>
 								<span class="pacing-value" style="color: var(--vscode-charts-orange);">$${currentCostOver.toFixed(2)}</span>
 							</div>
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
@@ -1481,12 +1496,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 							${quota.overage_permitted ? `
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
-								✓ Overage is permitted for your plan. Requests will continue to work.
+								✓ Overage is permitted for your plan. AI credits will continue to work.
 							</div>
 							` : `
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; color: var(--vscode-charts-red);">
-								✗ Overage is not permitted. Premium features may be limited until reset.
+								✗ Overage is not permitted. AI credits may be limited until reset.
 							</div>
 							`}
 						</div>
@@ -1525,9 +1540,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
               const planEntitlement = quota.entitlement;
               const hasCustomLimit = effectiveEntitlement > planEntitlement;
               const overageRequests = Math.max(0, used - planEntitlement);
-              const currentCost = overageRequests * OVERAGE_COST_PER_REQUEST;
+              const currentCost = overageRequests * CREDIT_COST_USD;
               const maxOverageRequests = effectiveEntitlement - planEntitlement;
-              const budgetCost = maxOverageRequests * OVERAGE_COST_PER_REQUEST;
+              const budgetCost = maxOverageRequests * CREDIT_COST_USD;
 
               pacingHtml = `
 						<div class="quota-pacing-highlight">
@@ -1536,15 +1551,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 								💰 Estimated Cost (limit: ${effectiveEntitlement}, plan: ${planEntitlement})
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Requests beyond your plan's built-in ${planEntitlement} entitlement">Overage requests:</span>
+								<span class="pacing-label" title="Credits beyond your plan's built-in ${planEntitlement} entitlement">Overage credits:</span>
 								<span class="pacing-value">${overageRequests} of ${maxOverageRequests}</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Current estimated cost at $${OVERAGE_COST_PER_REQUEST}/request">Current cost:</span>
+								<span class="pacing-label" title="Current estimated cost at $${CREDIT_COST_USD}/credit">Current cost:</span>
 								<span class="pacing-value" style="color: ${currentCost > 0 ? 'var(--vscode-charts-orange)' : 'var(--vscode-foreground)'};">$${currentCost.toFixed(2)}</span>
 							</div>
 							<div class="pacing-row">
-								<span class="pacing-label" title="Maximum cost if you use all ${effectiveEntitlement} requests">Budget cap:</span>
+								<span class="pacing-label" title="Maximum cost if you use all ${effectiveEntitlement} credits">Budget cap:</span>
 								<span class="pacing-value">$${budgetCost.toFixed(2)}</span>
 							</div>
 							<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
@@ -1563,7 +1578,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 							</div>
 						<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
 							<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">
-								Projections premium requests before the reset
+								Projected AI credits before the reset
 							</div>
 							<div class="pacing-row">
 								<span class="pacing-label" title="Recommended weekly limit">Weekly average:</span>
@@ -1621,16 +1636,16 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 								${isOverQuota
                 ? `<span class="stat-label" title="Amount over your monthly quota" style="color: var(--vscode-charts-red);">Over by:</span>
 								   <span class="stat-value" style="color: var(--vscode-charts-red);">${overageAmount}</span>`
-                : `<span class="stat-label" title="Calls available until the reset date">Remaining:</span>
+                : `<span class="stat-label" title="AI credits available until the reset date">Remaining:</span>
 								   <span class="stat-value">${fmtQuota(effectiveRemaining)}</span>`
               }
 							</div>
 							<div class="stat">
-								<span class="stat-label" title="Calls made since the last reset">Used:</span>
+								<span class="stat-label" title="AI credits used since the last reset">Used:</span>
 								<span class="stat-value">${fmtQuota(used)}</span>
 							</div>
 							<div class="stat">
-								<span class="stat-label" title="Total calls allowed in this period">Total:</span>
+								<span class="stat-label" title="Total AI credits allowed in this period">Total:</span>
 								<span class="stat-value">${effectiveEntitlement}</span>
 							</div>
 						</div>
@@ -1640,7 +1655,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 							<div class="quota-overage">
 								<span title="Additional usage allowed beyond standard quota">Overage permitted</span>
 								${isOverQuota
-                ? `<span class="overage-count" style="color: var(--vscode-charts-orange);" title="Estimated cost: ${Math.max(0, used - quota.entitlement)} requests beyond plan at $${OVERAGE_COST_PER_REQUEST}/request">$${(Math.max(0, used - quota.entitlement) * OVERAGE_COST_PER_REQUEST).toFixed(2)} est.</span>`
+                ? `<span class="overage-count" style="color: var(--vscode-charts-orange);" title="Estimated cost: ${Math.max(0, used - quota.entitlement)} credits beyond plan at $${CREDIT_COST_USD}/credit">$${(Math.max(0, used - quota.entitlement) * CREDIT_COST_USD).toFixed(2)} est.</span>`
                 : (quota.overage_count > 0
                   ? `<span class="overage-count">${quota.overage_count} used</span>`
                   : "")
@@ -2332,6 +2347,20 @@ export function activate(context: vscode.ExtensionContext) {
     context.globalState.update(INIT_KEY, true);
   }
 
+  // One-time migration: rename copilotInsights.customPremiumLimit -> customCreditLimit
+  const MIGRATION_KEY = "copilotInsights.customLimitMigrated";
+  const hasMigratedCustomLimit = context.globalState.get<boolean>(MIGRATION_KEY, false);
+  if (!hasMigratedCustomLimit) {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    const legacy = config.inspect<number>("customPremiumLimit");
+    const legacyGlobal = legacy?.globalValue;
+    const newValue = config.inspect<number>("customCreditLimit")?.globalValue;
+    if (typeof legacyGlobal === "number" && legacyGlobal > 0 && (newValue === undefined || newValue === 0)) {
+      config.update("customCreditLimit", legacyGlobal, vscode.ConfigurationTarget.Global);
+    }
+    context.globalState.update(MIGRATION_KEY, true);
+  }
+
   // Trigger initial data load to populate status bars
   provider.loadCopilotData();
 
@@ -2373,7 +2402,7 @@ export function activate(context: vscode.ExtensionContext) {
         await config.update("statusBarStyle", "detailed-original", vscode.ConfigurationTarget.Global);
         await config.update("statusBarLocation", "right", vscode.ConfigurationTarget.Global);
         await config.update("progressBarMode", "remaining", vscode.ConfigurationTarget.Global);
-        await config.update("customPremiumLimit", 0, vscode.ConfigurationTarget.Global);
+        await config.update("customCreditLimit", 0, vscode.ConfigurationTarget.Global);
         await config.update(
           "pollingIntervalSeconds",
           DEFAULT_POLLING_INTERVAL_SECONDS,

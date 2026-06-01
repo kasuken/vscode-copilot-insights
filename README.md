@@ -5,7 +5,7 @@
 <h1 align="center">Copilot Insights</h1>
 
 <p align="center">
-  See your GitHub Copilot plan, quotas, reset window, and premium usage trends directly inside VS Code.
+  See your GitHub Copilot plan, quotas, reset window, and AI credit usage trends directly inside VS Code.
 </p>
 
 ## Overview
@@ -14,7 +14,7 @@ Copilot Insights gives you a fast, local view of the quota and entitlement data 
 
 It focuses on operational visibility, not team analytics. The extension helps answer practical questions such as:
 
-- How much premium quota do I have left?
+- How many AI credits do I have left?
 - When does it reset?
 - Am I burning through quota faster than expected?
 - Do I have overage enabled?
@@ -23,12 +23,12 @@ It focuses on operational visibility, not team analytics. The extension helps an
 ## Highlights
 
 - Sidebar view with plan details, quota cards, pacing guidance, overage messaging, and organization access.
-- Premium usage trend tracking using locally stored snapshots.
-- Weighted prediction and burn-rate analysis for premium interactions.
+- AI credit usage trend tracking using locally stored snapshots.
+- Weighted prediction and burn-rate analysis for AI credits.
 - Status bar indicator with configurable placement, style, and content.
 - One-click export to clipboard as Markdown or raw JSON.
 - Configurable background polling, plus auto-refresh when the Insights view becomes visible.
-- Fractional precision for premium usage values and percentages so displayed numbers better match Copilot reporting.
+- Fractional precision for AI credit usage values and percentages so displayed numbers better match Copilot reporting.
 
 ## Screenshots
 
@@ -40,6 +40,8 @@ It focuses on operational visibility, not team analytics. The extension helps an
 
 ![Copilot Insights secondary screenshot](img/screen2.png)
 
+![Copilot Insights third screenshot](img/screen3.png)
+
 ## What You Get
 
 ### Sidebar view
@@ -49,16 +51,16 @@ The Copilot Insights activity bar view shows:
 - Plan summary, chat availability, and organization count.
 - Quotas for Copilot features, including correct handling for unlimited quotas.
 - Remaining, used, total, and percentage information for limited quotas.
-- Health badges or mood indicators based on remaining premium quota.
+- Health badges or mood indicators based on remaining AI credits.
 - Reset timing and pacing guidance to help spread usage across the billing window.
 - Overage state, over-quota summary, and estimated overage cost when applicable.
 - Local snapshot history with trend chart and delta comparisons.
-- Weighted prediction and burn-rate analysis for premium interactions.
+- Weighted prediction and burn-rate analysis for AI credits.
 - Troubleshooting context when the endpoint fails or returns stale data.
 
 ### Status bar
 
-The status bar provides a compact premium quota summary that can be shown on the left, right, or both sides.
+The status bar provides a compact AI credit summary that can be shown on the left, right, or both sides.
 
 Available styles:
 
@@ -136,7 +138,7 @@ The extension calculates:
 - Daily average to stay within quota until reset.
 - Weekly average.
 - Approximate workday and work-hour averages.
-- Daily capacity estimates for common premium model cost multipliers: `0.33x`, `1x`, and `3x`.
+- Daily capacity estimates for common AI model cost multipliers: `0.33x`, `1x`, and `3x`.
 
 These values are intentionally conservative and designed for quick decision-making rather than formal forecasting.
 
@@ -146,7 +148,7 @@ Copilot Insights uses VS Code's built-in GitHub authentication provider and requ
 
 - `https://api.github.com/copilot_internal/user`
 
-The extension stores a small local history of recent premium quota snapshots in VS Code global state so it can show trend and prediction views. No external service is used by this extension to store your quota history.
+The extension stores a small local history of recent AI credit snapshots in VS Code global state so it can show trend and prediction views. No external service is used by this extension to store your quota history.
 
 ## Troubleshooting
 
@@ -163,7 +165,7 @@ The extension stores a small local history of recent premium quota snapshots in 
 
 ### Numbers look slightly different from older versions
 
-- Recent versions preserve fractional precision for premium quota values and percentages instead of rounding everything to whole numbers.
+- Recent versions preserve fractional precision for AI credit values and percentages instead of rounding everything to whole numbers.
 
 ## Development
 
