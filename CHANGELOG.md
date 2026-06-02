@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.0.1] - 2026-06-02
+
+### Fixed
+- **"Over by" number formatting**: Overage amounts are now rounded to 1 decimal place, preventing raw floating-point values (e.g. `1.2999999999998`) from appearing in the status bar, tooltips, sidebar, and exports.
+
 # [4.0.0] - 2026-06-01
 
 ### Changed

@@ -570,7 +570,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     const isOverQuota = eq.remaining < 0;
     const percentRemaining = parseFloat(((eq.quota_remaining / eq.entitlement) * 100).toFixed(1));
     const percentUsed = parseFloat(((used / eq.entitlement) * 100).toFixed(1));
-    const overageAmount = isOverQuota ? Math.abs(eq.remaining) : 0;
+    const overageAmount = isOverQuota ? parseFloat(Math.abs(eq.remaining).toFixed(1)) : 0;
     const statusBadge = this._getStatusBadge(percentRemaining);
     return { used, isOverQuota, percentRemaining, percentUsed, overageAmount, statusBadge };
   }
@@ -2189,7 +2189,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     const showVisualIndicator = config.get<boolean>("statusBar.showVisualIndicator", true);
 
     const isOverQuota = premiumQuota.remaining < 0;
-    const overageAmount = isOverQuota ? Math.abs(premiumQuota.remaining) : 0;
+    const overageAmount = isOverQuota ? parseFloat(Math.abs(premiumQuota.remaining).toFixed(1)) : 0;
     const used = premiumQuota.entitlement - premiumQuota.quota_remaining;
     const fmtQuota = (n: number): string => String(parseFloat(n.toFixed(2)));
 
