@@ -1,9 +1,20 @@
 # Change Log
 
-# [4.0.1] - 2026-06-02
+# [4.0.2] - 2026-06-03
 
-### Fixed
-- **"Over by" number formatting**: Overage amounts are now rounded to 1 decimal place, preventing raw floating-point values (e.g. `1.2999999999998`) from appearing in the status bar, tooltips, sidebar, and exports.
+### Added 
+- Link to the official GitHub Copilot documentation for AI Credits.
+  
+### Changed
+-  titles for model cost labels to be more descriptive:
+  - Efficient (0.33x) to Efficient
+  - Standard (1x) to Standard
+  - Advanced (3x) to Advanced 
+
+  # [4.0.1] - 2026-06-02
+
+  ### Fixed
+  - **"Over by" number formatting**: Overage amounts are now rounded to 1 decimal place, preventing raw floating-point values (e.g. `1.2999999999998`) from appearing in the status bar, tooltips, sidebar, and exports.
 
 # [4.0.0] - 2026-06-01
 

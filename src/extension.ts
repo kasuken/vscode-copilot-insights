@@ -1598,16 +1598,19 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
                 Daily Capacity by Model Cost
               </div>
               <div class="pacing-row">
-                <span class="pacing-label" title="Model cost multiplier: 0.33x">Efficient (0.33x):</span>
+                <span class="pacing-label" title="Model cost efficient">Efficient:</span>
                 <span class="pacing-value">~${budget033}/day</span>
               </div>
               <div class="pacing-row">
-                <span class="pacing-label" title="Model cost multiplier: 1x">Standard (1x):</span>
+                <span class="pacing-label" title="Model cost standard">Standard:</span>
                 <span class="pacing-value">~${budget1}/day</span>
               </div>
               <div class="pacing-row">
-                <span class="pacing-label" title="Model cost multiplier: 3x">Advanced (3x):</span>
+                <span class="pacing-label" title="Model cost advanced">Advanced:</span>
                 <span class="pacing-value">~${budget3}/day</span>
+              </div>
+              <div style="margin-top: 6px; font-size: 11px; text-align: right;">
+                <a href="https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" style="color: var(--vscode-textLink-foreground); text-decoration: none;" title="Models and pricing table">Official models and pricing</a>
               </div>
 						</div>
 					`;
