@@ -896,6 +896,10 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     
     const trendInfo = trendStyles[trend.trend];
 
+    const recentCostPerDay = (trend.recentBurnRate * CREDIT_COST_USD).toFixed(2);
+    const overallCostPerDay = (trend.overallBurnRate * CREDIT_COST_USD).toFixed(2);
+    const projectedMonthlyCost = (trend.recentBurnRate * CREDIT_COST_USD * 30).toFixed(2);
+
     return `
       <div class="section">
         <h2 class="section-title">Burn Rate Analysis</h2>
@@ -909,11 +913,15 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
             <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
             <div class="prediction-row">
               <span class="prediction-label">Recent burn rate:</span>
-              <span class="prediction-value">${trend.recentBurnRate} credits/day</span>
+              <span class="prediction-value">${trend.recentBurnRate} credits/day (~$${recentCostPerDay}/day)</span>
             </div>
             <div class="prediction-row">
               <span class="prediction-label">Overall average:</span>
-              <span class="prediction-value">${trend.overallBurnRate} credits/day</span>
+              <span class="prediction-value">${trend.overallBurnRate} credits/day (~$${overallCostPerDay}/day)</span>
+            </div>
+            <div class="prediction-row">
+              <span class="prediction-label">Projected monthly cost:</span>
+              <span class="prediction-value">~$${projectedMonthlyCost}</span>
             </div>
             <div class="prediction-row">
               <span class="prediction-label">Trend:</span>
@@ -973,6 +981,14 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
               <span class="prediction-unit">credits/day</span>
             </div>
             <div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+            <div class="prediction-row">
+              <span class="prediction-label">Est. daily cost:</span>
+              <span class="prediction-value">~$${(prediction.predictedDailyUsage * CREDIT_COST_USD).toFixed(2)}/day</span>
+            </div>
+            <div class="prediction-row">
+              <span class="prediction-label">Projected monthly cost:</span>
+              <span class="prediction-value">~$${(prediction.predictedDailyUsage * CREDIT_COST_USD * 30).toFixed(2)}</span>
+            </div>
             ${exhaustionHtml}
             <div class="prediction-row">
               <span class="prediction-label">Sustainability:</span>
