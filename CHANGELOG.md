@@ -1,5 +1,15 @@
 # Change Log
 
+# [4.1.1] - 2026-06-05
+
+### Updated
+- Updated screenshot in the README to reflect the new AI prediction and burn rate analysis features added in 4.1.0.
+
+# [4.1.0] - 2026-06-04
+
+### Added
+- Estimated daily and monthly cost in USD for burn rate analysis. 
+
 # [4.0.2] - 2026-06-03
 
 ### Added 
