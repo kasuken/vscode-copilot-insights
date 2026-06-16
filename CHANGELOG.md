@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.1.2] - 2026-06-16
+
+### Added
+- Added clearer labels and descriptions for Copilot Chat and Suggestions quota cards.
+
 # [4.1.1] - 2026-06-05
 
 ### Updated

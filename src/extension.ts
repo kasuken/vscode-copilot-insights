@@ -1137,6 +1137,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     if (quotaId === "premium_interactions") {
       return "AI Credits";
     }
+    if (quotaId === "completions") {
+      return "Suggestions";
+    }
     return quotaId
       .replace(/_/g, " ")
       .replace(/\b\w/g, (l) => l.toUpperCase());
@@ -1416,7 +1419,19 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
           if (quota.quota_id === "premium_interactions") {
             quotaTooltip =
               "AI credits are consumed by Copilot features. Different models consume credits at different rates.";
+          } else if (quota.quota_id === "chat") {
+            quotaTooltip =
+              "Chat covers prompts and responses in Copilot Chat conversations.";
+          } else if (quota.quota_id === "completions") {
+            quotaTooltip =
+              "Suggestions are inline code suggestions shown while you type in the editor.";
           }
+
+          const quotaDescription = quota.quota_id === "chat"
+            ? "Chat is your interactive Copilot conversation usage."
+            : quota.quota_id === "completions"
+              ? "Suggestions are inline code proposals while you type."
+              : "";
 
           if (quota.unlimited) {
             return `
@@ -1425,6 +1440,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 								<div class="quota-title" title="${quotaTooltip}">${quotaName}</div>
 								<div class="quota-badge unlimited" title="You have unlimited usage for this feature">Unlimited</div>
 							</div>
+							${quotaDescription ? `<div class="quota-description">${quotaDescription}</div>` : ""}
 						</div>
 					`;
           }
@@ -1639,6 +1655,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 							<div class="quota-title" title="${quotaTooltip}">${quotaName}</div>
 							<div class="quota-badge">${progressLabel}</div>
 						</div>
+            ${quotaDescription ? `<div class="quota-description">${quotaDescription}</div>` : ""}
 						<div class="progress-bar">
 							<div class="progress-fill" style="width: ${progressPercent}%; background: ${progressBarColor};"></div>
 						</div>
@@ -1792,6 +1809,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 						font-weight: 600;
 						font-size: 13px;
 					}
+          .quota-description {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            margin-bottom: 8px;
+            line-height: 1.35;
+          }
 					.quota-badge {
 						font-size: 11px;
 						padding: 2px 6px;
