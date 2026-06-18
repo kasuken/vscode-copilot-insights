@@ -1147,13 +1147,21 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
     // Keep only snapshots that fall inside the current sprint window, oldest first.
-    const inWindow = validSnapshots
+    const realInWindow = validSnapshots
       .filter(s => {
         const t = new Date(s.timestamp).getTime();
         return Number.isFinite(t) && t >= startTime && t <= resetTime;
       })
       .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
       .sort((a, b) => a.t - b.t);
+
+    // Seed a default data point on day 0 of the sprint (full entitlement) so the
+    // burn-down always starts from the top-left corner, even before the first
+    // refresh of the new billing period is recorded.
+    const inWindow = [...realInWindow];
+    if (inWindow.length === 0 || inWindow[0].t > startTime) {
+      inWindow.unshift({ t: startTime, remaining: entitlement });
+    }
 
     if (inWindow.length < 2) {
       return "";
@@ -1208,6 +1216,43 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       circles += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="var(--vscode-charts-blue)" class="chart-point"/>';
     });
 
+    // Trend line: project the observed burn rate forward to the reset date (or
+    // to the point where credits would hit zero, whichever comes first).
+    let trendLine = "";
+    let trendLegend = "";
+    let trendFootnote = "";
+    const rateSource = realInWindow.length >= 2 ? realInWindow : inWindow;
+    const firstTrend = rateSource[0];
+    const lastTrend = rateSource[rateSource.length - 1];
+    const trendMs = lastTrend.t - firstTrend.t;
+    if (trendMs > 0 && lastTrend.remaining < firstTrend.remaining) {
+      const ratePerMs = (firstTrend.remaining - lastTrend.remaining) / trendMs;
+      const msToZero = lastTrend.remaining / ratePerMs;
+      const zeroTime = lastTrend.t + msToZero;
+
+      let endTime: number;
+      let endRemaining: number;
+      if (zeroTime < resetTime) {
+        endTime = zeroTime;
+        endRemaining = 0;
+      } else {
+        endTime = resetTime;
+        endRemaining = lastTrend.remaining - ratePerMs * (resetTime - lastTrend.t);
+      }
+
+      const tx1 = xAt(lastTrend.t).toFixed(1);
+      const ty1 = yAt(lastTrend.remaining).toFixed(1);
+      const tx2 = xAt(endTime).toFixed(1);
+      const ty2 = yAt(endRemaining).toFixed(1);
+      trendLine = '<line x1="' + tx1 + '" y1="' + ty1 + '" x2="' + tx2 + '" y2="' + ty2 + '" stroke="var(--vscode-charts-purple)" stroke-width="2.5" stroke-linecap="round" opacity="1"/>';
+      trendLegend = '<span class="legend-item"><span class="legend-swatch legend-trend"></span>Trend</span>';
+
+      if (zeroTime < resetTime) {
+        const d = new Date(zeroTime);
+        trendFootnote = ' · projected to run out ' + (d.getMonth() + 1) + '/' + d.getDate();
+      }
+    }
+
     // On-track status: compare actual remaining now vs the ideal line at "now".
     const fractionElapsed = clamp((now - startTime) / periodMs, 0, 1);
     const idealRemainingNow = entitlement * (1 - fractionElapsed);
@@ -1242,11 +1287,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       '<stop offset="100%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.05"/>' +
       '</linearGradient></defs>' +
       gridLines + yLabelsSvg +
-      // Ideal burn line (dashed reference).
-      '<line x1="' + idealStart.x.toFixed(1) + '" y1="' + idealStart.y.toFixed(1) + '" x2="' + idealEnd.x.toFixed(1) + '" y2="' + idealEnd.y.toFixed(1) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>' +
+      // Ideal burn line (subtle dashed reference).
+      '<line x1="' + idealStart.x.toFixed(1) + '" y1="' + idealStart.y.toFixed(1) + '" x2="' + idealEnd.x.toFixed(1) + '" y2="' + idealEnd.y.toFixed(1) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="1" stroke-dasharray="5,4" opacity="0.5"/>' +
       todayMarker +
       '<path d="' + areaPath + '" fill="url(#burnAreaGrad)"/>' +
       '<path d="' + actualPath + '" fill="none" stroke="var(--vscode-charts-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      trendLine +
       circles +
       '<text x="' + pad.left + '" y="' + (height - 5) + '" text-anchor="start" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(startTime) + '</text>' +
       '<text x="' + (width - pad.right) + '" y="' + (height - 5) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(resetTime) + ' (reset)</text>' +
@@ -1254,8 +1300,9 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       '<div class="burndown-legend">' +
       '<span class="legend-item"><span class="legend-swatch legend-actual"></span>Actual</span>' +
       '<span class="legend-item"><span class="legend-swatch legend-ideal"></span>Ideal</span>' +
+      trendLegend +
       '</div>' +
-      '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + '</div>' +
+      '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + trendFootnote + '</div>' +
       '</div>';
   }
 
@@ -2217,6 +2264,12 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 					.legend-ideal {
 						border-top-color: var(--vscode-descriptionForeground);
 						border-top-style: dashed;
+						opacity: 0.6;
+					}
+					.legend-trend {
+						border-top-color: var(--vscode-charts-purple);
+						border-top-style: solid;
+						border-top-width: 2.5px;
 					}
 					.prediction-container {
 						padding: 0;

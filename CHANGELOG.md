@@ -1,5 +1,11 @@
 # Change Log
 
+# [4.3.0] - 2026-06-18
+
+### Added
+- **Day 0 starting point**: The burn-down now seeds a default data point at the start of the billing period (full entitlement) so the chart always begins from the top-left, even before the first refresh of a new period is recorded.
+- **Usage trend line**: A projected trend line extrapolates your observed burn rate to the reset date (or to the point where credits would run out), with a footnote showing the projected run-out date when applicable.
+
 # [4.2.0] - 2026-06-18
 
 ### Changed
