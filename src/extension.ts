@@ -1098,7 +1098,168 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       '</div>';
   }
 
-  private _generateSnapshotHistoryHtml(): string {
+  /**
+   * Renders a sprint-style burn-down chart for the current billing period.
+   *
+   * The billing window acts as the "sprint": it starts roughly one calendar
+   * month before the quota reset date and ends on the reset date. The ideal
+   * line burns the full AI credit entitlement down to zero over that window,
+   * and the actual line plots recorded snapshots against it so users can see
+   * at a glance whether they are pacing ahead of or behind budget.
+   *
+   * Returns an empty string when the data needed to anchor the sprint window
+   * (a valid reset date and a positive entitlement) is unavailable, so the
+   * caller can fall back to the time-based chart.
+   */
+  private _generateBurndownChartHtml(data: CopilotUserData): string {
+    if (this._snapshotHistory.length < 2) {
+      return "";
+    }
+
+    // The most recent snapshot defines the current sprint's total budget.
+    const validSnapshots = this._snapshotHistory.filter(s => s.premium_entitlement > 0);
+    if (validSnapshots.length < 2) {
+      return "";
+    }
+
+    const entitlement = validSnapshots[0].premium_entitlement;
+    if (!(entitlement > 0)) {
+      return "";
+    }
+
+    // Anchor the sprint window to the reset date. Without it we can't draw an
+    // ideal burn line, so the caller falls back to the time-based chart.
+    const resetTime = new Date(data.quota_reset_date_utc).getTime();
+    if (!Number.isFinite(resetTime)) {
+      return "";
+    }
+
+    // Sprint start = one calendar month before the reset date.
+    const startDate = new Date(resetTime);
+    startDate.setMonth(startDate.getMonth() - 1);
+    const startTime = startDate.getTime();
+    const periodMs = resetTime - startTime;
+    if (!(periodMs > 0)) {
+      return "";
+    }
+
+    const now = Date.now();
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+    // Keep only snapshots that fall inside the current sprint window, oldest first.
+    const inWindow = validSnapshots
+      .filter(s => {
+        const t = new Date(s.timestamp).getTime();
+        return Number.isFinite(t) && t >= startTime && t <= resetTime;
+      })
+      .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
+      .sort((a, b) => a.t - b.t);
+
+    if (inWindow.length < 2) {
+      return "";
+    }
+
+    const width = 280;
+    const height = 120;
+    const pad = { top: 12, right: 12, bottom: 28, left: 40 };
+    const cw = width - pad.left - pad.right;
+    const ch = height - pad.top - pad.bottom;
+
+    const xAt = (t: number) => pad.left + (clamp(t, startTime, resetTime) - startTime) / periodMs * cw;
+    const yAt = (remaining: number) => pad.top + ch - clamp(remaining, 0, entitlement) / entitlement * ch;
+
+    // Ideal burn line: full entitlement at sprint start -> 0 at reset.
+    const idealStart = { x: pad.left, y: yAt(entitlement) };
+    const idealEnd = { x: pad.left + cw, y: yAt(0) };
+
+    // Actual burn line from recorded snapshots.
+    const pts = inWindow.map(s => ({ x: xAt(s.t), y: yAt(s.remaining) }));
+    let actualPath = "";
+    pts.forEach((p, i) => {
+      actualPath += (i === 0 ? "M" : "L") + " " + p.x.toFixed(1) + " " + p.y.toFixed(1) + " ";
+    });
+    const lastPt = pts[pts.length - 1];
+    const areaPath = actualPath + "L " + lastPt.x.toFixed(1) + " " + (height - pad.bottom) + " L " + pts[0].x.toFixed(1) + " " + (height - pad.bottom) + " Z";
+
+    // Grid + y-axis labels (0, half, full entitlement).
+    const yLabels = [
+      { val: Math.round(entitlement), y: pad.top },
+      { val: Math.round(entitlement / 2), y: pad.top + ch / 2 },
+      { val: 0, y: pad.top + ch }
+    ];
+    let gridLines = "";
+    let yLabelsSvg = "";
+    yLabels.forEach(l => {
+      gridLines += '<line x1="' + pad.left + '" y1="' + l.y + '" x2="' + (width - pad.right) + '" y2="' + l.y + '" stroke="var(--vscode-panel-border)" stroke-dasharray="2,2" opacity="0.5"/>';
+      yLabelsSvg += '<text x="' + (pad.left - 5) + '" y="' + (l.y + 3) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + l.val + '</text>';
+    });
+
+    // "Today" marker (only when we're inside the sprint window).
+    let todayMarker = "";
+    if (now >= startTime && now <= resetTime) {
+      const tx = xAt(now).toFixed(1);
+      todayMarker =
+        '<line x1="' + tx + '" y1="' + pad.top + '" x2="' + tx + '" y2="' + (pad.top + ch) + '" stroke="var(--vscode-charts-orange)" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>' +
+        '<text x="' + tx + '" y="' + (pad.top - 3) + '" text-anchor="middle" fill="var(--vscode-charts-orange)" font-size="8">today</text>';
+    }
+
+    let circles = "";
+    pts.forEach(p => {
+      circles += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="var(--vscode-charts-blue)" class="chart-point"/>';
+    });
+
+    // On-track status: compare actual remaining now vs the ideal line at "now".
+    const fractionElapsed = clamp((now - startTime) / periodMs, 0, 1);
+    const idealRemainingNow = entitlement * (1 - fractionElapsed);
+    const actualRemainingNow = validSnapshots[0].premium_remaining;
+    const delta = actualRemainingNow - idealRemainingNow;
+    let statusText: string;
+    let statusColor: string;
+    if (now >= resetTime) {
+      statusText = "Sprint complete · awaiting reset";
+      statusColor = "var(--vscode-descriptionForeground)";
+    } else if (delta >= entitlement * 0.05) {
+      statusText = "On track · " + Math.round(delta) + " credits ahead of pace";
+      statusColor = "var(--vscode-charts-green)";
+    } else if (delta <= -entitlement * 0.05) {
+      statusText = "Behind pace · " + Math.round(Math.abs(delta)) + " credits over budget";
+      statusColor = "var(--vscode-charts-red)";
+    } else {
+      statusText = "On pace with the ideal burn-down";
+      statusColor = "var(--vscode-descriptionForeground)";
+    }
+
+    const fmtDate = (t: number) => {
+      const d = new Date(t);
+      return (d.getMonth() + 1) + "/" + d.getDate();
+    };
+
+    return '<div class="snapshot-chart">' +
+      '<div class="chart-title">AI Credits Burn-down</div>' +
+      '<svg width="' + width + '" height="' + height + '" class="history-chart">' +
+      '<defs><linearGradient id="burnAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.3"/>' +
+      '<stop offset="100%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.05"/>' +
+      '</linearGradient></defs>' +
+      gridLines + yLabelsSvg +
+      // Ideal burn line (dashed reference).
+      '<line x1="' + idealStart.x.toFixed(1) + '" y1="' + idealStart.y.toFixed(1) + '" x2="' + idealEnd.x.toFixed(1) + '" y2="' + idealEnd.y.toFixed(1) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>' +
+      todayMarker +
+      '<path d="' + areaPath + '" fill="url(#burnAreaGrad)"/>' +
+      '<path d="' + actualPath + '" fill="none" stroke="var(--vscode-charts-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      circles +
+      '<text x="' + pad.left + '" y="' + (height - 5) + '" text-anchor="start" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(startTime) + '</text>' +
+      '<text x="' + (width - pad.right) + '" y="' + (height - 5) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(resetTime) + ' (reset)</text>' +
+      '</svg>' +
+      '<div class="burndown-legend">' +
+      '<span class="legend-item"><span class="legend-swatch legend-actual"></span>Actual</span>' +
+      '<span class="legend-item"><span class="legend-swatch legend-ideal"></span>Ideal</span>' +
+      '</div>' +
+      '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + '</div>' +
+      '</div>';
+  }
+
+  private _generateSnapshotHistoryHtml(data: CopilotUserData): string {
     if (this._snapshotHistory.length < 2) {
       return "";
     }
@@ -1119,12 +1280,16 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       yesterdayRow = '<div class="snapshot-row"><span class="snapshot-label">Since yesterday:</span><span class="snapshot-value ' + cls + '">' + val + '</span></div>';
     }
 
+    // Prefer the sprint burn-down chart; fall back to the time-based chart when
+    // we don't have a valid reset date to anchor the "sprint" window.
+    const chartHtml = this._generateBurndownChartHtml(data) || this._generateSnapshotChartHtml();
+
     return '<div class="section">' +
-      '<h2 class="section-title">Local Change History</h2>' +
+      '<h2 class="section-title">Sprint Burn-down</h2>' +
       '<div class="quota-card">' +
       '<div class="snapshot-history">' +
       lastRefreshRow + yesterdayRow +
-      this._generateSnapshotChartHtml() +
+      chartHtml +
       '</div></div></div>';
   }
 
@@ -2026,6 +2191,33 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 						margin-top: 6px;
 						text-align: center;
 					}
+					.burndown-legend {
+						display: flex;
+						justify-content: center;
+						gap: 14px;
+						margin-top: 6px;
+					}
+					.legend-item {
+						display: inline-flex;
+						align-items: center;
+						gap: 5px;
+						font-size: 10px;
+						color: var(--vscode-descriptionForeground);
+					}
+					.legend-swatch {
+						display: inline-block;
+						width: 14px;
+						height: 0;
+						border-top-width: 2px;
+						border-top-style: solid;
+					}
+					.legend-actual {
+						border-top-color: var(--vscode-charts-blue);
+					}
+					.legend-ideal {
+						border-top-color: var(--vscode-descriptionForeground);
+						border-top-style: dashed;
+					}
 					.prediction-container {
 						padding: 0;
 					}
@@ -2139,7 +2331,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
       }
 				</div>
 
-				${this._generateSnapshotHistoryHtml()}
+				${this._generateSnapshotHistoryHtml(data)}
 
 				${this._generateWeightedPredictionHtml(data)}
 

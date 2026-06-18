@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.2.0] - 2026-06-18
+
+### Changed
+- **Sprint Burn-down**: Replaced the "Local Change History" section with a sprint-style burn-down chart. The current billing period acts as the "sprint": the chart plots your actual AI credit usage against an ideal burn line that trends to zero by the reset date, with a "today" marker and an at-a-glance on-track / behind-pace status. The familiar burn-down paradigm makes it easier to see whether you're pacing within budget.
+
 # [4.1.2] - 2026-06-16
 
 ### Added
