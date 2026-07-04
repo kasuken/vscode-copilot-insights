@@ -23,7 +23,7 @@ It focuses on operational visibility, not team analytics. The extension helps an
 ## Highlights
 
 - Sidebar view with plan details, quota cards, pacing guidance, overage messaging, and organization access.
-- AI credit usage trend tracking using locally stored snapshots.
+- Sprint burn-down chart that plots your actual AI credit usage against an ideal pace line for the current billing period, using locally stored snapshots.
 - Weighted prediction and burn-rate analysis for AI credits.
 - Status bar indicator with configurable placement, style, and content.
 - One-click export to clipboard as Markdown or raw JSON.

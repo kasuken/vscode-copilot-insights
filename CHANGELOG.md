@@ -1,9 +1,20 @@
 # Change Log
 
-# [4.1.3] - 2026-07-04
+# [4.3.1] - 2026-07-04
 
 ### Added
 - Added clearer explanations for unlimited Chat messages and IDE code suggestions in quota cards.
+
+# [4.3.0] - 2026-06-18
+
+### Added
+- **Day 0 starting point**: The burn-down now seeds a default data point at the start of the billing period (full entitlement) so the chart always begins from the top-left, even before the first refresh of a new period is recorded.
+- **Usage trend line**: A projected trend line extrapolates your observed burn rate to the reset date (or to the point where credits would run out), with a footnote showing the projected run-out date when applicable.
+
+# [4.2.0] - 2026-06-18
+
+### Changed
+- **Sprint Burn-down**: Replaced the "Local Change History" section with a sprint-style burn-down chart. The current billing period acts as the "sprint": the chart plots your actual AI credit usage against an ideal burn line that trends to zero by the reset date, with a "today" marker and an at-a-glance on-track / behind-pace status. The familiar burn-down paradigm makes it easier to see whether you're pacing within budget.
 
 # [4.1.2] - 2026-06-16
 
