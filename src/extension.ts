@@ -1434,6 +1434,11 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
               : "";
 
           if (quota.unlimited) {
+            const unlimitedDescription = quota.quota_id === "chat"
+              ? "Chat messages are not limited by message count, but calls to premium AI models and other metered Copilot capabilities may consume GitHub AI Credits."
+              : quota.quota_id === "completions"
+                ? "Code suggestions in the IDE are included with this plan and do not consume GitHub AI Credits."
+                : "This plan includes this feature without a tracked monthly balance. GitHub AI Credits may still apply separately to premium models and metered capabilities.";
             return `
 						<div class="quota-card">
 							<div class="quota-header">
@@ -1441,6 +1446,7 @@ class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.
 								<div class="quota-badge unlimited" title="You have unlimited usage for this feature">Unlimited</div>
 							</div>
 							${quotaDescription ? `<div class="quota-description">${quotaDescription}</div>` : ""}
+              <div class="quota-description">${unlimitedDescription}</div>
 						</div>
 					`;
           }

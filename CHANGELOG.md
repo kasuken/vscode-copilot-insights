@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.1.3] - 2026-07-04
+
+### Added
+- Added clearer explanations for unlimited Chat messages and IDE code suggestions in quota cards.
+
 # [4.1.2] - 2026-06-16
 
 ### Added
