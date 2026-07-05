@@ -1,5 +1,45 @@
 # Change Log
 
+# [4.6.0] - 2026-07-05
+
+### Added
+- **Configurable usage alerts**: new `copilotInsights.alertThresholds` setting (default `[85]`) — set multiple thresholds (e.g. `[50, 75, 90]`); each fires once per billing period.
+- **Used today + daily budget**: the Sprint Burn-down section now shows AI credits used since midnight, optionally compared against a `copilotInsights.dailyBudget`.
+- **Copilot Chat integration**: a `#copilotQuota` language model tool lets Copilot Chat answer questions like “how many AI credits do I have left?” with your live quota data.
+- **Export & clear history**: new commands to export the local snapshot history as JSON/CSV or clear it.
+- **Status bar style picker**: `Copilot Insights: Choose Status Bar Style` with live preview while you browse the seven styles.
+- **Logging**: a `Copilot Insights` output channel (with `Show Logs` command) records refreshes, alerts, migrations, and background errors.
+- **Getting Started walkthrough** for new users.
+- **Localization infrastructure**: contribution strings externalized to `package.nls.json`, all sidebar and notification strings routed through `vscode.l10n`, locale-aware date and relative-time formatting following your VS Code display language, and an `l10n/` bundle template for translators.
+
+### Changed
+- `Reset to Defaults` now removes setting overrides instead of writing explicit values into your settings.json.
+
+# [4.5.0] - 2026-07-05
+
+### Changed
+- **No more scroll jumps**: the sidebar now updates in place via messages instead of re-rendering the whole page on every refresh, so your scroll position survives background polling.
+- **Per-account history**: local snapshot history is now stored per GitHub account, so switching accounts no longer mixes usage data. Existing history is migrated automatically.
+- **Bundled with esbuild**: faster activation and a smaller extension package.
+- Internal: the extension was split from a single 2,700-line file into focused modules (API client, quota math, history, predictions, status bar, webview) with a 65-test suite and CI/release GitHub Actions workflows.
+
+# [4.4.0] - 2026-07-05
+
+### Added
+- **Status bar background colors**: the status bar item now actually colors its background (red when over quota, yellow below 20% remaining) when `copilotInsights.statusBar.enableColoredBackground` is enabled — previously the setting only switched icons.
+- **Sign-in state**: when no GitHub session is available, the status bar and sidebar show a clear "Sign in" state with a button instead of a spinner or error.
+- The extension refreshes automatically when you sign in or out of GitHub in VS Code.
+
+### Fixed
+- No more GitHub sign-in prompt at VS Code startup: authentication is silent in the background and only interactive when you open the Insights view or refresh manually.
+- Clearer error message for 401/403 authentication failures, with a hint to re-authenticate.
+- All API-provided values rendered in the sidebar are now HTML-escaped, and the webview Content-Security-Policy is hardened (nonce-based scripts, no remote resources).
+- Codicon icons are bundled locally instead of loading from a remote CDN — the sidebar now renders fully offline.
+
+### Removed
+- Removed the non-functional `copilotInsights.autoRefreshInterval` setting. If you had it configured, the value is migrated automatically to `copilotInsights.pollingIntervalSeconds`.
+- The extension no longer writes default settings into your `settings.json` on first install.
+
 # [4.3.1] - 2026-07-04
 
 ### Added

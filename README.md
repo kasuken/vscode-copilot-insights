@@ -102,6 +102,14 @@ You can also package and install locally from a VSIX during development.
 - Copilot Insights: Refresh
 - Copilot Insights: Open Settings
 - Copilot Insights: Reset to Defaults
+- Copilot Insights: Choose Status Bar Style (with live preview)
+- Copilot Insights: Export Snapshot History (JSON or CSV)
+- Copilot Insights: Clear Snapshot History
+- Copilot Insights: Show Logs
+
+## Copilot Chat integration
+
+Ask Copilot Chat about your quota — reference the `#copilotQuota` tool in your prompt (or just ask "how many AI credits do I have left?" in agent mode) and it will answer using your live quota data.
 
 ## Configuration
 
@@ -117,6 +125,10 @@ Key settings:
 - `copilotInsights.statusBar.showName`: Toggle the `Copilot:` label.
 - `copilotInsights.statusBar.showNumericalQuota`: Toggle `remaining/total` display.
 - `copilotInsights.statusBar.showVisualIndicator`: Toggle the bar, ring, emoji, or similar style element.
+- `copilotInsights.statusBar.enableColoredBackground`: Turn the status bar red when over quota / yellow below 20% remaining.
+- `copilotInsights.customCreditLimit`: Budget against a custom AI credit limit above your plan entitlement.
+- `copilotInsights.alertThresholds`: Usage percentages that trigger a warning notification (default `[85]`), each once per billing period.
+- `copilotInsights.dailyBudget`: Optional daily AI credit budget shown against today's usage.
 
 Example:
 
@@ -185,10 +197,11 @@ Then press `F5` in VS Code to launch an Extension Development Host.
 
 Useful scripts:
 
-- `npm run compile`
-- `npm run watch`
-- `npm test`
-- `npm run test-vsix`
+- `npm run compile` — typecheck, lint, and bundle (esbuild → `dist/`)
+- `npm run watch` — rebuild the bundle on change
+- `npm test` — run the test suite in a VS Code test host
+- `npm run package` — production bundle
+- `npm run test-vsix` — package and install the VSIX locally
 
 ## License
 

@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes to the VS Marketplace and creates a GitHub Release when a
+# version tag (v*) is pushed. Requires the VSCE_PAT repository secret
+# (a Visual Studio Marketplace personal access token).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package VSIX
+        run: npx @vscode/vsce package
+
+      - name: Publish to VS Marketplace
+        run: npx @vscode/vsce publish --packagePath ./*.vsix -p ${{ secrets.VSCE_PAT }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.vsix"
+          generate_release_notes: true
