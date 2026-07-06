@@ -29,6 +29,9 @@
   const ROLE_VARS = {
     actual: ["--vscode-charts-blue", "#3794ff"],
     daily: ["--vscode-charts-blue", "#3794ff"],
+    forecastExpected: ["--vscode-charts-blue", "#3794ff"],
+    forecastOptimistic: ["--vscode-charts-green", "#89d185"],
+    forecastPessimistic: ["--vscode-charts-red", "#f14c4c"],
     ideal: ["--vscode-descriptionForeground", "#a0a0a0"],
     overage: ["--vscode-charts-red", "#f14c4c"],
     remaining: ["--vscode-charts-green", "#89d185"],

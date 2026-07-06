@@ -384,6 +384,17 @@ body {
 	border-top-style: solid;
 	border-top-width: 2.5px;
 }
+.legend-forecast-optimistic {
+	border-top-color: var(--vscode-charts-green);
+	border-top-style: dashed;
+}
+.legend-forecast-expected {
+	border-top-color: var(--vscode-charts-blue);
+}
+.legend-forecast-pessimistic {
+	border-top-color: var(--vscode-charts-red);
+	border-top-style: dashed;
+}
 .prediction-container {
 	padding: 0;
 }

@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.6.4] - 2026-07-06
+
+### Added
+- **Forecast Range chart**: the Weighted Prediction section now projects remaining AI credits through reset with optimistic, expected, and pessimistic burn-rate scenarios based on prediction confidence.
+
 # [4.6.3] - 2026-07-06
 
 ### Added

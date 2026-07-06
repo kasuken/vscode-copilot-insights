@@ -11,6 +11,7 @@ import {
 import {
   calculateDaysUntilReset,
   computeQuotaStats,
+  findPremiumQuota,
   getEffectiveQuota,
   getMood,
   getStatusBadge,
@@ -35,7 +36,7 @@ export interface RenderConfig {
 /** A single plotted series or doughnut segment, described as raw data (no colors). */
 export interface ChartSeries {
   /** Semantic role; the webview maps this to theme colors and line styles. */
-  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage";
+  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage" | "forecastOptimistic" | "forecastExpected" | "forecastPessimistic";
   /** Chart.js dataset type for this series. Defaults to the chart model type. */
   type?: "line" | "bar" | "doughnut";
   /** Human-readable label used in tooltips. */
@@ -65,7 +66,7 @@ export interface ChartAxisTick {
  */
 export interface ChartModel {
   id: string;
-  kind: "burndown" | "snapshot" | "dailyUsage" | "remainingUsed";
+  kind: "burndown" | "snapshot" | "dailyUsage" | "remainingUsed" | "forecastRange";
   type: "line" | "bar" | "doughnut";
   series: ChartSeries[];
   xMin: number;
@@ -191,6 +192,7 @@ export function buildViewModel(
     new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
 
   const history = renderHistorySection(data, snapshots, config);
+  const weighted = renderWeightedPredictionSection(data, snapshots, config.customLimit);
 
   return {
     state: "data",
@@ -200,13 +202,13 @@ export function buildViewModel(
         : "",
       quotas: renderQuotasSection(data, asOfTime, config),
       history: history.html,
-      weighted: renderWeightedPredictionSection(data, snapshots, config.customLimit),
+      weighted: weighted.html,
       trend: renderTrendSection(snapshots),
       summary: renderSummarySection(data),
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
     },
-    charts: history.charts,
+    charts: [...history.charts, ...weighted.charts],
     lastFetched: t("Last fetched: {0}", timeSince),
   };
 }
@@ -712,12 +714,22 @@ function renderWeightedPredictionSection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
   customLimit: number
-): string {
+): { html: string; charts: ChartModel[] } {
   const prediction = getWeightedPrediction(snapshots, data, customLimit);
 
   if (!prediction) {
-    return "";
+    return { html: "", charts: [] };
   }
+
+  const forecastChart = buildForecastRangeChartModel(data, prediction.predictedDailyUsage, prediction.confidence, customLimit);
+  const forecastHtml = forecastChart
+    ? '<div class="snapshot-chart">' +
+    '<div class="chart-title">' + forecastChart.title + '</div>' +
+    '<div class="chart-canvas-wrap chart-canvas-wrap-compact"><canvas id="' + forecastChart.model.id + '"></canvas></div>' +
+    forecastChart.legendHtml +
+    forecastChart.footnoteHtml +
+    '</div>'
+    : "";
 
   // Confidence badge styling
   const confidenceStyles = {
@@ -748,7 +760,7 @@ function renderWeightedPredictionSection(
 		`;
   }
 
-  return `
+  const html = `
 		<div class="section">
 			<h2 class="section-title">${t("Weighted Prediction")}</h2>
 			<div class="quota-card">
@@ -778,10 +790,130 @@ function renderWeightedPredictionSection(
 					<div class="prediction-footer">
 						${confidenceReason}
 					</div>
+					${forecastHtml}
 				</div>
 			</div>
 		</div>
 	`;
+
+  return { html, charts: forecastChart ? [forecastChart.model] : [] };
+}
+
+function buildForecastRangeChartModel(
+  data: CopilotUserData,
+  predictedDailyUsage: number,
+  confidence: "low" | "medium" | "high",
+  customLimit: number
+): ChartResult | null {
+  if (!(predictedDailyUsage > 0)) {
+    return null;
+  }
+
+  const premiumQuota = findPremiumQuota(data.quota_snapshots);
+  if (!premiumQuota || premiumQuota.unlimited) {
+    return null;
+  }
+
+  const resetTime = new Date(data.quota_reset_date_utc).getTime();
+  const now = Date.now();
+  if (!Number.isFinite(resetTime) || resetTime <= now) {
+    return null;
+  }
+
+  const effectiveQuota = getEffectiveQuota(premiumQuota, customLimit);
+  if (!(effectiveQuota.entitlement > 0)) {
+    return null;
+  }
+
+  const currentRemaining = Math.max(0, effectiveQuota.remaining);
+  const daysUntilReset = (resetTime - now) / (1000 * 60 * 60 * 24);
+  const uncertainty = confidence === "high" ? 0.15 : confidence === "medium" ? 0.3 : 0.5;
+  const optimisticRate = predictedDailyUsage * (1 - uncertainty);
+  const pessimisticRate = predictedDailyUsage * (1 + uncertainty);
+
+  const projectedPoints = (dailyRate: number) => {
+    const remainingAtReset = Math.max(0, currentRemaining - dailyRate * daysUntilReset);
+    if (dailyRate > 0 && remainingAtReset === 0 && currentRemaining > 0) {
+      const zeroTime = now + currentRemaining / dailyRate * 24 * 60 * 60 * 1000;
+      if (zeroTime < resetTime) {
+        return [
+          { x: now, y: currentRemaining },
+          { x: zeroTime, y: 0 },
+          { x: resetTime, y: 0 },
+        ];
+      }
+    }
+    return [
+      { x: now, y: currentRemaining },
+      { x: resetTime, y: remainingAtReset },
+    ];
+  };
+
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms);
+    return (d.getMonth() + 1) + "/" + d.getDate();
+  };
+  const formatRate = (rate: number) => formatQuotaValue(rate);
+
+  const model: ChartModel = {
+    id: "forecastRangeChart",
+    kind: "forecastRange",
+    type: "line",
+    series: [
+      {
+        role: "forecastOptimistic",
+        label: t("Optimistic ({0}/day)", formatRate(optimisticRate)),
+        points: projectedPoints(optimisticRate),
+        fill: false,
+        dashed: true,
+        showPoints: false,
+        tooltip: true,
+      },
+      {
+        role: "forecastExpected",
+        label: t("Expected ({0}/day)", formatRate(predictedDailyUsage)),
+        points: projectedPoints(predictedDailyUsage),
+        fill: false,
+        dashed: false,
+        showPoints: false,
+        tooltip: true,
+      },
+      {
+        role: "forecastPessimistic",
+        label: t("Pessimistic ({0}/day)", formatRate(pessimisticRate)),
+        points: projectedPoints(pessimisticRate),
+        fill: false,
+        dashed: true,
+        showPoints: false,
+        tooltip: true,
+      },
+    ],
+    xMin: now,
+    xMax: resetTime,
+    yMin: 0,
+    yMax: Math.max(effectiveQuota.entitlement, currentRemaining, 1),
+    xTicks: [
+      { value: now, label: t("Today") },
+      { value: resetTime, label: fmtDate(resetTime) + ' (' + t("reset") + ')' },
+    ],
+    yTicks: [0, Math.max(effectiveQuota.entitlement, currentRemaining, 1) / 2, Math.max(effectiveQuota.entitlement, currentRemaining, 1)],
+    unit: t("credits"),
+  };
+
+  const legendHtml =
+    '<div class="burndown-legend">' +
+    '<span class="legend-item"><span class="legend-swatch legend-forecast-optimistic"></span>' + t("Optimistic") + '</span>' +
+    '<span class="legend-item"><span class="legend-swatch legend-forecast-expected"></span>' + t("Expected") + '</span>' +
+    '<span class="legend-item"><span class="legend-swatch legend-forecast-pessimistic"></span>' + t("Pessimistic") + '</span>' +
+    '</div>';
+  const footnoteHtml = '<div class="chart-footnote">' + t("Forecast range through reset, based on {0} confidence", t(confidence)) + '</div>';
+
+  return {
+    model,
+    title: t("Forecast Range"),
+    legendHtml,
+    footnoteHtml,
+  };
 }
 
 function renderHistorySection(
