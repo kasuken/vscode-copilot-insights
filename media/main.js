@@ -28,6 +28,9 @@
   // Map a series role to its theme color variable (with a hardcoded fallback).
   const ROLE_VARS = {
     actual: ["--vscode-charts-blue", "#3794ff"],
+    burnOverall: ["--vscode-charts-blue", "#3794ff"],
+    burnRecent: ["--vscode-charts-orange", "#d18616"],
+    burnTarget: ["--vscode-charts-green", "#89d185"],
     daily: ["--vscode-charts-blue", "#3794ff"],
     forecastExpected: ["--vscode-charts-blue", "#3794ff"],
     forecastOptimistic: ["--vscode-charts-green", "#89d185"],
@@ -88,7 +91,7 @@
         data: series.points,
         borderColor: rgb,
         backgroundColor: series.type === "bar" || model.type === "bar" ? withAlpha(rgb, 0.55) : rgb,
-        borderWidth: series.role === "trend" ? 2.5 : series.role === "actual" ? 2 : 1,
+        borderWidth: series.role === "trend" || series.role === "burnTarget" ? 2.5 : series.role === "actual" ? 2 : 1,
         borderDash: dash,
         borderRadius: series.type === "bar" || model.type === "bar" ? 3 : 0,
         barPercentage: 0.72,
@@ -175,6 +178,9 @@
               title: (items) => {
                 if (!items.length) {
                   return "";
+                }
+                if (model.kind === "burnRateCombo") {
+                  return xTickMap.get(items[0].parsed.x) || items[0].dataset.label || "";
                 }
                 return new Date(items[0].parsed.x).toLocaleString(undefined, {
                   month: "short",

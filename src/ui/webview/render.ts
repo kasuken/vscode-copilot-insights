@@ -36,7 +36,7 @@ export interface RenderConfig {
 /** A single plotted series or doughnut segment, described as raw data (no colors). */
 export interface ChartSeries {
   /** Semantic role; the webview maps this to theme colors and line styles. */
-  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage" | "forecastOptimistic" | "forecastExpected" | "forecastPessimistic";
+  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage" | "forecastOptimistic" | "forecastExpected" | "forecastPessimistic" | "burnOverall" | "burnRecent" | "burnTarget";
   /** Chart.js dataset type for this series. Defaults to the chart model type. */
   type?: "line" | "bar" | "doughnut";
   /** Human-readable label used in tooltips. */
@@ -66,7 +66,7 @@ export interface ChartAxisTick {
  */
 export interface ChartModel {
   id: string;
-  kind: "burndown" | "snapshot" | "dailyUsage" | "remainingUsed" | "forecastRange";
+  kind: "burndown" | "snapshot" | "dailyUsage" | "remainingUsed" | "forecastRange" | "burnRateCombo";
   type: "line" | "bar" | "doughnut";
   series: ChartSeries[];
   xMin: number;
@@ -193,6 +193,7 @@ export function buildViewModel(
 
   const history = renderHistorySection(data, snapshots, config);
   const weighted = renderWeightedPredictionSection(data, snapshots, config.customLimit);
+  const trend = renderTrendSection(data, snapshots, config.customLimit);
 
   return {
     state: "data",
@@ -203,12 +204,12 @@ export function buildViewModel(
       quotas: renderQuotasSection(data, asOfTime, config),
       history: history.html,
       weighted: weighted.html,
-      trend: renderTrendSection(snapshots),
+      trend: trend.html,
       summary: renderSummarySection(data),
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
     },
-    charts: [...history.charts, ...weighted.charts],
+    charts: [...history.charts, ...weighted.charts, ...trend.charts],
     lastFetched: t("Last fetched: {0}", timeSince),
   };
 }
@@ -634,12 +635,26 @@ function renderQuotasSection(
 	`;
 }
 
-function renderTrendSection(snapshots: readonly LocalSnapshot[]): string {
+function renderTrendSection(
+  data: CopilotUserData,
+  snapshots: readonly LocalSnapshot[],
+  customLimit: number
+): { html: string; charts: ChartModel[] } {
   const trend = getTrendPrediction(snapshots);
 
   if (!trend) {
-    return "";
+    return { html: "", charts: [] };
   }
+
+  const burnRateChart = buildBurnRateComboChartModel(data, trend, customLimit);
+  const burnRateChartHtml = burnRateChart
+    ? '<div class="snapshot-chart">' +
+    '<div class="chart-title">' + burnRateChart.title + '</div>' +
+    '<div class="chart-canvas-wrap chart-canvas-wrap-compact"><canvas id="' + burnRateChart.model.id + '"></canvas></div>' +
+    burnRateChart.legendHtml +
+    burnRateChart.footnoteHtml +
+    '</div>'
+    : "";
 
   const trendStyles = {
     accelerating: {
@@ -674,7 +689,7 @@ function renderTrendSection(snapshots: readonly LocalSnapshot[]): string {
   const overallCostPerDay = (trend.overallBurnRate * CREDIT_COST_USD).toFixed(2);
   const projectedMonthlyCost = (trend.recentBurnRate * CREDIT_COST_USD * 30).toFixed(2);
 
-  return `
+  const html = `
 		<div class="section">
 			<h2 class="section-title">${t("Burn Rate Analysis")}</h2>
 			<div class="quota-card">
@@ -704,10 +719,105 @@ function renderTrendSection(snapshots: readonly LocalSnapshot[]): string {
 					<div class="prediction-footer">
 						${t("Based on {0} measurements from local history", trend.dataPoints)}
 					</div>
+					${burnRateChartHtml}
 				</div>
 			</div>
 		</div>
 	`;
+
+  return { html, charts: burnRateChart ? [burnRateChart.model] : [] };
+}
+
+function buildBurnRateComboChartModel(
+  data: CopilotUserData,
+  trend: { recentBurnRate: number; overallBurnRate: number },
+  customLimit: number
+): ChartResult | null {
+  const premiumQuota = findPremiumQuota(data.quota_snapshots);
+  if (!premiumQuota || premiumQuota.unlimited) {
+    return null;
+  }
+
+  const resetTime = new Date(data.quota_reset_date_utc).getTime();
+  const now = Date.now();
+  if (!Number.isFinite(resetTime) || resetTime <= now) {
+    return null;
+  }
+
+  const effectiveQuota = getEffectiveQuota(premiumQuota, customLimit);
+  const daysUntilReset = (resetTime - now) / (1000 * 60 * 60 * 24);
+  if (!(daysUntilReset > 0)) {
+    return null;
+  }
+
+  const targetBurnRate = Math.max(0, effectiveQuota.remaining) / daysUntilReset;
+  const yMax = Math.max(trend.overallBurnRate, trend.recentBurnRate, targetBurnRate, 1) * 1.2;
+
+  const model: ChartModel = {
+    id: "burnRateComboChart",
+    kind: "burnRateCombo",
+    type: "bar",
+    series: [
+      {
+        role: "burnOverall",
+        type: "bar",
+        label: t("Overall average"),
+        points: [{ x: 0, y: trend.overallBurnRate }],
+        fill: false,
+        dashed: false,
+        showPoints: false,
+        tooltip: true,
+      },
+      {
+        role: "burnRecent",
+        type: "bar",
+        label: t("Recent burn rate"),
+        points: [{ x: 1, y: trend.recentBurnRate }],
+        fill: false,
+        dashed: false,
+        showPoints: false,
+        tooltip: true,
+      },
+      {
+        role: "burnTarget",
+        type: "line",
+        label: t("Target pace"),
+        points: [
+          { x: -0.35, y: targetBurnRate },
+          { x: 1.35, y: targetBurnRate },
+        ],
+        fill: false,
+        dashed: true,
+        showPoints: false,
+        tooltip: true,
+      },
+    ],
+    xMin: -0.5,
+    xMax: 1.5,
+    yMin: 0,
+    yMax,
+    xTicks: [
+      { value: 0, label: t("Overall") },
+      { value: 1, label: t("Recent") },
+    ],
+    yTicks: [0, yMax / 2, yMax],
+    unit: t("credits/day"),
+  };
+
+  const legendHtml =
+    '<div class="burndown-legend">' +
+    '<span class="legend-item"><span class="legend-dot legend-burn-overall"></span>' + t("Overall") + '</span>' +
+    '<span class="legend-item"><span class="legend-dot legend-burn-recent"></span>' + t("Recent") + '</span>' +
+    '<span class="legend-item"><span class="legend-swatch legend-burn-target"></span>' + t("Target pace") + '</span>' +
+    '</div>';
+  const footnoteHtml = '<div class="chart-footnote">' + t("Target pace: {0} credits/day to last until reset", formatQuotaValue(targetBurnRate)) + '</div>';
+
+  return {
+    model,
+    title: t("Burn Rate vs Target Pace"),
+    legendHtml,
+    footnoteHtml,
+  };
 }
 
 function renderWeightedPredictionSection(

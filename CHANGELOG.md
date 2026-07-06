@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.6.5] - 2026-07-06
+
+### Added
+- **Burn Rate bar/line combo chart**: the Burn Rate Analysis section now compares overall and recent burn rates as bars with a target pace line for lasting until reset.
+
 # [4.6.4] - 2026-07-06
 
 ### Added
