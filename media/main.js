@@ -19,15 +19,16 @@
   }
 
   // --- Chart.js rendering -------------------------------------------------
-  // The extension posts a serializable chart model (points + ranges + ticks,
+  // The extension posts serializable chart models (points + ranges + ticks,
   // no colors). We resolve theme colors here so the canvas tracks the active
   // VS Code theme, then draw with Chart.js.
-  let chartInstance = null;
-  let lastChartModel = null;
+  const chartInstances = new Map();
+  let lastChartModels = [];
 
   // Map a series role to its theme color variable (with a hardcoded fallback).
   const ROLE_VARS = {
     actual: ["--vscode-charts-blue", "#3794ff"],
+    daily: ["--vscode-charts-blue", "#3794ff"],
     ideal: ["--vscode-descriptionForeground", "#a0a0a0"],
     trend: ["--vscode-charts-purple", "#b180d7"],
     today: ["--vscode-charts-orange", "#d18616"],
@@ -76,11 +77,16 @@
             : [6, 4]
         : [];
       const dataset = {
+        type: series.type || model.type,
         label: series.label,
         data: series.points,
         borderColor: rgb,
+        backgroundColor: series.type === "bar" || model.type === "bar" ? withAlpha(rgb, 0.55) : rgb,
         borderWidth: series.role === "trend" ? 2.5 : series.role === "actual" ? 2 : 1,
         borderDash: dash,
+        borderRadius: series.type === "bar" || model.type === "bar" ? 3 : 0,
+        barPercentage: 0.72,
+        categoryPercentage: 0.8,
         pointRadius: series.showPoints ? 2.5 : 0,
         pointHoverRadius: series.showPoints ? 4.5 : 0,
         pointBackgroundColor: rgb,
@@ -107,7 +113,7 @@
     const yTickValues = model.yTicks.slice();
 
     return {
-      type: "line",
+      type: model.type,
       data: { datasets: buildDatasets(model) },
       options: {
         responsive: true,
@@ -175,16 +181,24 @@
     };
   }
 
-  function renderChart(model) {
-    if (chartInstance) {
-      chartInstance.destroy();
-      chartInstance = null;
+  function destroyCharts() {
+    for (const chart of chartInstances.values()) {
+      chart.destroy();
     }
-    const canvas = document.getElementById("insightsChart");
-    if (!model || !canvas || typeof Chart === "undefined") {
+    chartInstances.clear();
+  }
+
+  function renderCharts(models) {
+    destroyCharts();
+    if (!Array.isArray(models) || typeof Chart === "undefined") {
       return;
     }
-    chartInstance = new Chart(canvas, buildConfig(model));
+    for (const model of models) {
+      const canvas = document.getElementById(model.id);
+      if (canvas) {
+        chartInstances.set(model.id, new Chart(canvas, buildConfig(model)));
+      }
+    }
   }
 
   function applyModel(model) {
@@ -211,10 +225,14 @@
           }
         }
         document.getElementById("last-updated").textContent = model.lastFetched || "";
-        lastChartModel = model.chart || null;
+        lastChartModels = Array.isArray(model.charts)
+          ? model.charts
+          : model.chart
+            ? [model.chart]
+            : [];
         showState("data");
         // Draw after showState so the canvas has layout to size against.
-        renderChart(lastChartModel);
+        renderCharts(lastChartModels);
         return;
       }
     }
@@ -241,8 +259,8 @@
   // Re-render the chart when the color theme changes so canvas colors, which
   // are resolved from CSS variables at draw time, track the active theme.
   new MutationObserver(() => {
-    if (lastChartModel) {
-      renderChart(lastChartModel);
+    if (lastChartModels.length > 0) {
+      renderCharts(lastChartModels);
     }
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 

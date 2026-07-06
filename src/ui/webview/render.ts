@@ -35,7 +35,9 @@ export interface RenderConfig {
 /** A single plotted line in a chart, described as raw data (no colors). */
 export interface ChartSeries {
   /** Semantic role; the webview maps this to theme colors and line styles. */
-  role: "actual" | "ideal" | "trend" | "today";
+  role: "actual" | "ideal" | "trend" | "today" | "daily";
+  /** Chart.js dataset type for this series. Defaults to the chart model type. */
+  type?: "line" | "bar";
   /** Human-readable label used in tooltips. */
   label: string;
   /** Data points in value space (x = epoch ms, y = credits). */
@@ -62,7 +64,9 @@ export interface ChartAxisTick {
  * draws it with Chart.js, so canvas colors track the active VS Code theme.
  */
 export interface ChartModel {
-  kind: "burndown" | "snapshot";
+  id: string;
+  kind: "burndown" | "snapshot" | "dailyUsage";
+  type: "line" | "bar";
   series: ChartSeries[];
   xMin: number;
   xMax: number;
@@ -88,7 +92,7 @@ export interface InsightsViewModel {
     access: string;
   };
   /** Data for the history chart, drawn on a canvas by the webview. */
-  chart: ChartModel | null;
+  charts: ChartModel[];
   lastFetched: string;
 }
 
@@ -202,7 +206,7 @@ export function buildViewModel(
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
     },
-    chart: history.chart,
+    charts: history.charts,
     lastFetched: t("Last fetched: {0}", timeSince),
   };
 }
@@ -784,9 +788,9 @@ function renderHistorySection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
   config: RenderConfig
-): { html: string; chart: ChartModel | null } {
+): { html: string; charts: ChartModel[] } {
   if (snapshots.length < 2) {
-    return { html: "", chart: null };
+    return { html: "", charts: [] };
   }
 
   const comp = getSnapshotComparisons(snapshots);
@@ -824,17 +828,28 @@ function renderHistorySection(
   // Prefer the sprint burn-down chart; fall back to the time-based chart when
   // we don't have a valid reset date to anchor the "sprint" window.
   const chartResult = buildBurndownChartModel(data, snapshots) ?? buildSnapshotChartModel(snapshots);
+  const dailyUsageChart = buildDailyUsageChartModel(data, snapshots, config);
 
   let chartHtml = "";
-  let chart: ChartModel | null = null;
+  const charts: ChartModel[] = [];
   if (chartResult) {
-    chart = chartResult.model;
+    charts.push(chartResult.model);
     chartHtml =
       '<div class="snapshot-chart">' +
       '<div class="chart-title">' + chartResult.title + '</div>' +
-      '<div class="chart-canvas-wrap"><canvas id="insightsChart"></canvas></div>' +
+      '<div class="chart-canvas-wrap"><canvas id="' + chartResult.model.id + '"></canvas></div>' +
       chartResult.legendHtml +
       chartResult.footnoteHtml +
+      '</div>';
+  }
+  if (dailyUsageChart) {
+    charts.push(dailyUsageChart.model);
+    chartHtml +=
+      '<div class="snapshot-chart">' +
+      '<div class="chart-title">' + dailyUsageChart.title + '</div>' +
+      '<div class="chart-canvas-wrap chart-canvas-wrap-compact"><canvas id="' + dailyUsageChart.model.id + '"></canvas></div>' +
+      dailyUsageChart.legendHtml +
+      dailyUsageChart.footnoteHtml +
       '</div>';
   }
 
@@ -846,7 +861,7 @@ function renderHistorySection(
     chartHtml +
     '</div></div></div>';
 
-  return { html, chart };
+  return { html, charts };
 }
 
 /** A built chart: the data model for the webview plus prebuilt section HTML. */
@@ -893,7 +908,9 @@ function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResu
   };
 
   const model: ChartModel = {
+    id: "insightsChart",
     kind: "snapshot",
+    type: "line",
     series: [
       {
         role: "actual",
@@ -1108,7 +1125,9 @@ function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly Loca
   };
 
   const model: ChartModel = {
+    id: "insightsChart",
     kind: "burndown",
+    type: "line",
     series,
     xMin: startTime,
     xMax: resetTime,
@@ -1135,5 +1154,109 @@ function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly Loca
     title: t("AI Credits Burn-down"),
     legendHtml,
     footnoteHtml,
+  };
+}
+
+function buildDailyUsageChartModel(
+  data: CopilotUserData,
+  snapshots: readonly LocalSnapshot[],
+  config: RenderConfig
+): ChartResult | null {
+  if (snapshots.length < 2) {
+    return null;
+  }
+
+  const validSnapshots = snapshots
+    .filter(s => s.premium_entitlement > 0)
+    .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
+    .filter(s => Number.isFinite(s.t))
+    .sort((a, b) => a.t - b.t);
+  if (validSnapshots.length < 2) {
+    return null;
+  }
+
+  let startTime = validSnapshots[0].t;
+  const resetTime = new Date(data.quota_reset_date_utc).getTime();
+  if (Number.isFinite(resetTime)) {
+    const startDate = new Date(resetTime);
+    startDate.setMonth(startDate.getMonth() - 1);
+    if (startDate.getTime() < resetTime) {
+      startTime = startDate.getTime();
+    }
+  }
+
+  const dayKey = (ms: number) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const formatDay = (ms: number) => {
+    const d = new Date(ms);
+    return (d.getMonth() + 1) + "/" + d.getDate();
+  };
+
+  const dailyUsage = new Map<number, number>();
+  for (let i = 1; i < validSnapshots.length; i++) {
+    const prev = validSnapshots[i - 1];
+    const curr = validSnapshots[i];
+    if (curr.t < startTime || curr.t > (Number.isFinite(resetTime) ? resetTime : Date.now())) {
+      continue;
+    }
+    const used = prev.remaining - curr.remaining;
+    if (used <= 0) {
+      continue;
+    }
+    const key = dayKey(curr.t);
+    dailyUsage.set(key, (dailyUsage.get(key) ?? 0) + used);
+  }
+
+  if (dailyUsage.size === 0) {
+    return null;
+  }
+
+  const points = [...dailyUsage.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([x, y]) => ({ x, y }));
+  const maxUsed = Math.max(...points.map(p => p.y));
+  const yMax = Math.max(maxUsed, config.dailyBudget > 0 ? config.dailyBudget : 0) * 1.15 || 1;
+  const xMin = points[0].x - 12 * 60 * 60 * 1000;
+  const xMax = points[points.length - 1].x + 12 * 60 * 60 * 1000;
+
+  const xTicks: ChartAxisTick[] = points.length === 1
+    ? [{ value: points[0].x, label: formatDay(points[0].x) }]
+    : [
+      { value: points[0].x, label: formatDay(points[0].x) },
+      { value: points[points.length - 1].x, label: formatDay(points[points.length - 1].x) },
+    ];
+
+  const model: ChartModel = {
+    id: "dailyUsageChart",
+    kind: "dailyUsage",
+    type: "bar",
+    series: [
+      {
+        role: "daily",
+        type: "bar",
+        label: t("Used"),
+        points,
+        fill: false,
+        dashed: false,
+        showPoints: false,
+        tooltip: true,
+      },
+    ],
+    xMin,
+    xMax,
+    yMin: 0,
+    yMax,
+    xTicks,
+    yTicks: [0, yMax / 2, yMax],
+    unit: t("credits"),
+  };
+
+  return {
+    model,
+    title: t("Daily AI Credit Usage"),
+    legendHtml: "",
+    footnoteHtml: '<div class="chart-footnote">' + t("Estimated from local refresh deltas") + '</div>',
   };
 }

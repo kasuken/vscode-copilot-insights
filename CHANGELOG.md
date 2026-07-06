@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.6.2] - 2026-07-06
+
+### Added
+- **Daily AI credit usage chart**: the Sprint Burn-down section now includes a compact daily bar chart that estimates credits used per day from local refresh deltas, making spikes easier to spot.
+
 # [4.6.1] - 2026-07-06
 
 ### Changed

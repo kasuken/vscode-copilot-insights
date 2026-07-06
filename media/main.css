@@ -323,6 +323,9 @@ body {
 	height: 140px;
 	margin-top: 4px;
 }
+.chart-canvas-wrap-compact {
+	height: 120px;
+}
 .chart-footnote {
 	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
