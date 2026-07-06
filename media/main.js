@@ -30,8 +30,11 @@
     actual: ["--vscode-charts-blue", "#3794ff"],
     daily: ["--vscode-charts-blue", "#3794ff"],
     ideal: ["--vscode-descriptionForeground", "#a0a0a0"],
+    overage: ["--vscode-charts-red", "#f14c4c"],
+    remaining: ["--vscode-charts-green", "#89d185"],
     trend: ["--vscode-charts-purple", "#b180d7"],
     today: ["--vscode-charts-orange", "#d18616"],
+    used: ["--vscode-charts-blue", "#3794ff"],
   };
 
   // Resolve a CSS variable to a concrete rgb(a) string. Canvas can't read CSS
@@ -106,6 +109,10 @@
   }
 
   function buildConfig(model) {
+    if (model.type === "doughnut") {
+      return buildDoughnutConfig(model);
+    }
+
     const muted = resolveColor("--vscode-descriptionForeground", "#a0a0a0");
     const grid = withAlpha(resolveColor("--vscode-panel-border", "#80808066"), 0.5);
     const xTickMap = new Map(model.xTicks.map((tick) => [tick.value, tick.label]));
@@ -174,6 +181,49 @@
                 });
               },
               label: (item) => item.dataset.label + ": " + Math.round(item.parsed.y) + " " + model.unit,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function buildDoughnutConfig(model) {
+    const values = model.series.map((series) => series.points[0]?.y || 0);
+    const labels = model.series.map((series) => series.label);
+    const colors = model.series.map((series) => {
+      const spec = ROLE_VARS[series.role] || ROLE_VARS.actual;
+      return resolveColor(spec[0], spec[1]);
+    });
+    const border = resolveColor("--vscode-editor-background", "#1e1e1e");
+
+    return {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: values,
+            backgroundColor: colors.map((color) => withAlpha(color, 0.82)),
+            borderColor: border,
+            borderWidth: 2,
+            hoverOffset: 3,
+            _tooltip: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        cutout: "68%",
+        layout: { padding: { top: 2, right: 24, bottom: 2, left: 24 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              label: (item) => item.label + ": " + Math.round(item.raw) + " " + model.unit,
             },
           },
         },

@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.6.3] - 2026-07-06
+
+### Added
+- **Remaining vs Used doughnut chart**: the Sprint Burn-down section now includes a compact quota composition chart for used, remaining, and overage AI credits.
+
 # [4.6.2] - 2026-07-06
 
 ### Added

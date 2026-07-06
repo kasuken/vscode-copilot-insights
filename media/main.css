@@ -326,6 +326,9 @@ body {
 .chart-canvas-wrap-compact {
 	height: 120px;
 }
+.chart-canvas-wrap-doughnut {
+	height: 128px;
+}
 .chart-footnote {
 	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
@@ -353,8 +356,23 @@ body {
 	border-top-width: 2px;
 	border-top-style: solid;
 }
+.legend-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
 .legend-actual {
 	border-top-color: var(--vscode-charts-blue);
+}
+.legend-used {
+	background-color: var(--vscode-charts-blue);
+}
+.legend-remaining {
+	background-color: var(--vscode-charts-green);
+}
+.legend-overage {
+	background-color: var(--vscode-charts-red);
 }
 .legend-ideal {
 	border-top-color: var(--vscode-descriptionForeground);

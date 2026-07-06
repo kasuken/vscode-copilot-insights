@@ -32,12 +32,12 @@ export interface RenderConfig {
   dailyBudget: number;
 }
 
-/** A single plotted line in a chart, described as raw data (no colors). */
+/** A single plotted series or doughnut segment, described as raw data (no colors). */
 export interface ChartSeries {
   /** Semantic role; the webview maps this to theme colors and line styles. */
-  role: "actual" | "ideal" | "trend" | "today" | "daily";
+  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage";
   /** Chart.js dataset type for this series. Defaults to the chart model type. */
-  type?: "line" | "bar";
+  type?: "line" | "bar" | "doughnut";
   /** Human-readable label used in tooltips. */
   label: string;
   /** Data points in value space (x = epoch ms, y = credits). */
@@ -65,8 +65,8 @@ export interface ChartAxisTick {
  */
 export interface ChartModel {
   id: string;
-  kind: "burndown" | "snapshot" | "dailyUsage";
-  type: "line" | "bar";
+  kind: "burndown" | "snapshot" | "dailyUsage" | "remainingUsed";
+  type: "line" | "bar" | "doughnut";
   series: ChartSeries[];
   xMin: number;
   xMax: number;
@@ -789,10 +789,6 @@ function renderHistorySection(
   snapshots: readonly LocalSnapshot[],
   config: RenderConfig
 ): { html: string; charts: ChartModel[] } {
-  if (snapshots.length < 2) {
-    return { html: "", charts: [] };
-  }
-
   const comp = getSnapshotComparisons(snapshots);
 
   let lastRefreshRow = "";
@@ -827,14 +823,25 @@ function renderHistorySection(
 
   // Prefer the sprint burn-down chart; fall back to the time-based chart when
   // we don't have a valid reset date to anchor the "sprint" window.
+  const remainingUsedChart = buildRemainingUsedChartModel(data, config);
   const chartResult = buildBurndownChartModel(data, snapshots) ?? buildSnapshotChartModel(snapshots);
   const dailyUsageChart = buildDailyUsageChartModel(data, snapshots, config);
 
   let chartHtml = "";
   const charts: ChartModel[] = [];
+  if (remainingUsedChart) {
+    charts.push(remainingUsedChart.model);
+    chartHtml =
+      '<div class="snapshot-chart">' +
+      '<div class="chart-title">' + remainingUsedChart.title + '</div>' +
+      '<div class="chart-canvas-wrap chart-canvas-wrap-doughnut"><canvas id="' + remainingUsedChart.model.id + '"></canvas></div>' +
+      remainingUsedChart.legendHtml +
+      remainingUsedChart.footnoteHtml +
+      '</div>';
+  }
   if (chartResult) {
     charts.push(chartResult.model);
-    chartHtml =
+    chartHtml +=
       '<div class="snapshot-chart">' +
       '<div class="chart-title">' + chartResult.title + '</div>' +
       '<div class="chart-canvas-wrap"><canvas id="' + chartResult.model.id + '"></canvas></div>' +
@@ -870,6 +877,88 @@ interface ChartResult {
   title: string;
   legendHtml: string;
   footnoteHtml: string;
+}
+
+function buildRemainingUsedChartModel(data: CopilotUserData, config: RenderConfig): ChartResult | null {
+  const premiumQuota = data.quota_snapshots
+    ? Object.values(data.quota_snapshots).find(q => q.quota_id === "premium_interactions")
+    : undefined;
+  if (!premiumQuota || premiumQuota.unlimited) {
+    return null;
+  }
+
+  const effectiveQuota = getEffectiveQuota(premiumQuota, config.customLimit);
+  const { used, isOverQuota, overageAmount } = computeQuotaStats(effectiveQuota);
+  if (!(effectiveQuota.entitlement > 0)) {
+    return null;
+  }
+
+  const inQuotaUsed = Math.min(Math.max(used, 0), effectiveQuota.entitlement);
+  const remaining = Math.max(effectiveQuota.remaining, 0);
+  const series: ChartSeries[] = [
+    {
+      role: "used",
+      type: "doughnut",
+      label: t("Used"),
+      points: [{ x: 0, y: inQuotaUsed }],
+      fill: false,
+      dashed: false,
+      showPoints: false,
+      tooltip: true,
+    },
+    {
+      role: "remaining",
+      type: "doughnut",
+      label: t("Remaining"),
+      points: [{ x: 1, y: remaining }],
+      fill: false,
+      dashed: false,
+      showPoints: false,
+      tooltip: true,
+    },
+  ];
+
+  if (isOverQuota && overageAmount > 0) {
+    series.push({
+      role: "overage",
+      type: "doughnut",
+      label: t("Overage"),
+      points: [{ x: 2, y: overageAmount }],
+      fill: false,
+      dashed: false,
+      showPoints: false,
+      tooltip: true,
+    });
+  }
+
+  const model: ChartModel = {
+    id: "remainingUsedChart",
+    kind: "remainingUsed",
+    type: "doughnut",
+    series,
+    xMin: 0,
+    xMax: 0,
+    yMin: 0,
+    yMax: effectiveQuota.entitlement,
+    xTicks: [],
+    yTicks: [],
+    unit: t("credits"),
+  };
+
+  const legendHtml =
+    '<div class="burndown-legend">' +
+    '<span class="legend-item"><span class="legend-dot legend-used"></span>' + t("Used") + '</span>' +
+    '<span class="legend-item"><span class="legend-dot legend-remaining"></span>' + t("Remaining") + '</span>' +
+    (isOverQuota ? '<span class="legend-item"><span class="legend-dot legend-overage"></span>' + t("Overage") + '</span>' : '') +
+    '</div>';
+  const footnoteHtml = '<div class="chart-footnote">' + t("{0} of {1} credits used", formatQuotaValue(used), formatQuotaValue(effectiveQuota.entitlement)) + '</div>';
+
+  return {
+    model,
+    title: t("Remaining vs Used"),
+    legendHtml,
+    footnoteHtml,
+  };
 }
 
 function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResult | null {
