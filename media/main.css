@@ -317,17 +317,11 @@ body {
 	margin-bottom: 8px;
 	color: var(--vscode-foreground);
 }
-.history-chart {
+.chart-canvas-wrap {
+	position: relative;
 	width: 100%;
-	height: auto;
-	display: block;
-}
-.chart-point {
-	transition: r 0.15s ease;
-	cursor: pointer;
-}
-.chart-point:hover {
-	r: 5;
+	height: 140px;
+	margin-top: 4px;
 }
 .chart-footnote {
 	font-size: 10px;

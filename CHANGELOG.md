@@ -1,5 +1,11 @@
 # Change Log
 
+# [4.6.1] - 2026-07-06
+
+### Changed
+- **Chart rendering migrated to Chart.js**: replaced custom SVG-based history and sprint burn-down rendering with a Chart.js-powered canvas implementation while preserving existing pacing logic, trend projection, today marker, and status/legend messaging.
+- **Webview asset packaging**: the Chart.js UMD bundle is now copied into `media/` during `copy-assets` so charts keep working offline under the extension webview CSP.
+
 # [4.6.0] - 2026-07-05
 
 ### Added

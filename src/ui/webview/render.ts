@@ -32,6 +32,48 @@ export interface RenderConfig {
   dailyBudget: number;
 }
 
+/** A single plotted line in a chart, described as raw data (no colors). */
+export interface ChartSeries {
+  /** Semantic role; the webview maps this to theme colors and line styles. */
+  role: "actual" | "ideal" | "trend" | "today";
+  /** Human-readable label used in tooltips. */
+  label: string;
+  /** Data points in value space (x = epoch ms, y = credits). */
+  points: { x: number; y: number }[];
+  /** Whether to fill the area beneath the line down to the axis baseline. */
+  fill: boolean;
+  /** Whether the line is dashed. */
+  dashed: boolean;
+  /** Whether to draw point markers. */
+  showPoints: boolean;
+  /** Whether this series participates in hover tooltips. */
+  tooltip: boolean;
+}
+
+/** An explicit axis tick: a value in data space and the label to show for it. */
+export interface ChartAxisTick {
+  value: number;
+  label: string;
+}
+
+/**
+ * Serializable description of the history chart. The extension computes the
+ * data (points, ranges, ticks) while the webview resolves theme colors and
+ * draws it with Chart.js, so canvas colors track the active VS Code theme.
+ */
+export interface ChartModel {
+  kind: "burndown" | "snapshot";
+  series: ChartSeries[];
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  xTicks: ChartAxisTick[];
+  yTicks: number[];
+  /** Localized unit label for tooltips (e.g. "credits"). */
+  unit: string;
+}
+
 /** Serializable model posted to the webview. Each section is prebuilt HTML. */
 export interface InsightsViewModel {
   state: "data";
@@ -45,6 +87,8 @@ export interface InsightsViewModel {
     orgs: string;
     access: string;
   };
+  /** Data for the history chart, drawn on a canvas by the webview. */
+  chart: ChartModel | null;
   lastFetched: string;
 }
 
@@ -72,6 +116,7 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 	<link rel="stylesheet" href="${mediaUri("codicons", "codicon.css")}">
 	<link rel="stylesheet" href="${mediaUri("main.css")}">
+	<script nonce="${nonce}" src="${mediaUri("chart.umd.min.js")}"></script>
 	<title>Copilot Insights</title>
 </head>
 <body>
@@ -141,6 +186,8 @@ export function buildViewModel(
   const isStale =
     new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
 
+  const history = renderHistorySection(data, snapshots, config);
+
   return {
     state: "data",
     sections: {
@@ -148,13 +195,14 @@ export function buildViewModel(
         ? `<div class="warning-banner">⚠️ ${t("Data may be stale (fetched over 1 hour ago)")}</div>`
         : "",
       quotas: renderQuotasSection(data, asOfTime, config),
-      history: renderHistorySection(data, snapshots, config),
+      history: history.html,
       weighted: renderWeightedPredictionSection(data, snapshots, config.customLimit),
       trend: renderTrendSection(snapshots),
       summary: renderSummarySection(data),
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
     },
+    chart: history.chart,
     lastFetched: t("Last fetched: {0}", timeSince),
   };
 }
@@ -736,9 +784,9 @@ function renderHistorySection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
   config: RenderConfig
-): string {
+): { html: string; chart: ChartModel | null } {
   if (snapshots.length < 2) {
-    return "";
+    return { html: "", chart: null };
   }
 
   const comp = getSnapshotComparisons(snapshots);
@@ -775,114 +823,110 @@ function renderHistorySection(
 
   // Prefer the sprint burn-down chart; fall back to the time-based chart when
   // we don't have a valid reset date to anchor the "sprint" window.
-  const chartHtml = renderBurndownChart(data, snapshots) || renderSnapshotChart(snapshots);
+  const chartResult = buildBurndownChartModel(data, snapshots) ?? buildSnapshotChartModel(snapshots);
 
-  return '<div class="section">' +
+  let chartHtml = "";
+  let chart: ChartModel | null = null;
+  if (chartResult) {
+    chart = chartResult.model;
+    chartHtml =
+      '<div class="snapshot-chart">' +
+      '<div class="chart-title">' + chartResult.title + '</div>' +
+      '<div class="chart-canvas-wrap"><canvas id="insightsChart"></canvas></div>' +
+      chartResult.legendHtml +
+      chartResult.footnoteHtml +
+      '</div>';
+  }
+
+  const html = '<div class="section">' +
     '<h2 class="section-title">' + t("Sprint Burn-down") + '</h2>' +
     '<div class="quota-card">' +
     '<div class="snapshot-history">' +
     lastRefreshRow + yesterdayRow + todayRow +
     chartHtml +
     '</div></div></div>';
+
+  return { html, chart };
 }
 
-function renderSnapshotChart(snapshots: readonly LocalSnapshot[]): string {
+/** A built chart: the data model for the webview plus prebuilt section HTML. */
+interface ChartResult {
+  model: ChartModel;
+  title: string;
+  legendHtml: string;
+  footnoteHtml: string;
+}
+
+function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResult | null {
   if (snapshots.length < 2) {
-    return "";
+    return null;
   }
 
   // Filter out snapshots with invalid entitlement (keep negative remaining for overage tracking)
   const validSnapshots = snapshots.filter(s => s.premium_entitlement > 0);
   if (validSnapshots.length < 2) {
-    return "";
+    return null;
   }
 
   const ordered = [...validSnapshots].reverse();
   const count = ordered.length;
 
-  const width = 280;
-  const height = 100;
-  const pad = { top: 10, right: 10, bottom: 25, left: 40 };
-  const cw = width - pad.left - pad.right;
-  const ch = height - pad.top - pad.bottom;
-
   const vals = ordered.map(s => s.premium_remaining);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
   const range = maxV - minV || 1;
-
   const yMin = minV - range * 0.1;
   const yMax = maxV + range * 0.1;
-  const yRange = yMax - yMin || 1;
 
-  const pts = ordered.map((s, i) => {
-    const x = pad.left + (i / (count - 1)) * cw;
-    const y = pad.top + ch - ((s.premium_remaining - yMin) / yRange) * ch;
-    return { x, y, v: s.premium_remaining, t: s.timestamp };
-  });
+  const points = ordered.map(s => ({ x: new Date(s.timestamp).getTime(), y: s.premium_remaining }));
+  const xMin = points[0].x;
+  const xMax = points[points.length - 1].x;
 
-  let linePath = "";
-  pts.forEach((p, i) => {
-    linePath += (i === 0 ? "M" : "L") + " " + p.x.toFixed(1) + " " + p.y.toFixed(1) + " ";
-  });
-
-  const lastPt = pts[pts.length - 1];
-  const areaPath = linePath + "L " + lastPt.x.toFixed(1) + " " + (height - pad.bottom) + " L " + pad.left + " " + (height - pad.bottom) + " Z";
-
-  const yLabels = [
-    { val: Math.round(yMax), y: pad.top },
-    { val: Math.round((yMax + yMin) / 2), y: pad.top + ch / 2 },
-    { val: Math.round(yMin), y: pad.top + ch }
-  ];
-
-  const formatTime = (ts: string, isOldest: boolean): string => {
+  const formatOldest = (ts: string): string => {
     const d = new Date(ts);
-    const now = new Date();
-    const mins = (now.getTime() - d.getTime()) / (1000 * 60);
+    const mins = (Date.now() - d.getTime()) / (1000 * 60);
     const hrs = mins / 60;
-    // For the oldest point, always show relative time even if recent
-    if (isOldest) {
-      if (mins < 1) { return "<1m ago"; }
-      if (mins < 60) { return Math.floor(mins) + "m ago"; }
-      if (hrs < 24) { return Math.floor(hrs) + "h ago"; }
-      return Math.floor(hrs / 24) + "d ago";
-    }
-    // For the newest point, show "now"
-    return "now";
+    if (mins < 1) { return "<1m ago"; }
+    if (mins < 60) { return Math.floor(mins) + "m ago"; }
+    if (hrs < 24) { return Math.floor(hrs) + "h ago"; }
+    return Math.floor(hrs / 24) + "d ago";
   };
 
-  let gridLines = "";
-  let yLabelsSvg = "";
-  yLabels.forEach(l => {
-    gridLines += '<line x1="' + pad.left + '" y1="' + l.y + '" x2="' + (width - pad.right) + '" y2="' + l.y + '" stroke="var(--vscode-panel-border)" stroke-dasharray="2,2" opacity="0.5"/>';
-    yLabelsSvg += '<text x="' + (pad.left - 5) + '" y="' + (l.y + 3) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + l.val + '</text>';
-  });
+  const model: ChartModel = {
+    kind: "snapshot",
+    series: [
+      {
+        role: "actual",
+        label: t("AI Credits"),
+        points,
+        fill: true,
+        dashed: false,
+        showPoints: true,
+        tooltip: true,
+      },
+    ],
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    xTicks: [
+      { value: xMin, label: formatOldest(ordered[0].timestamp) },
+      { value: xMax, label: "now" },
+    ],
+    yTicks: [yMin, (yMin + yMax) / 2, yMax],
+    unit: t("credits"),
+  };
 
-  let circles = "";
-  pts.forEach(p => {
-    circles += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3" fill="var(--vscode-charts-blue)" class="chart-point"/>';
-  });
-
-  return '<div class="snapshot-chart">' +
-    '<div class="chart-title">' + t("AI Credits Over Time") + '</div>' +
-    '<svg width="' + width + '" height="' + height + '" class="history-chart">' +
-    '<defs><linearGradient id="areaGrad" x1="0%" y1="0%" x2="0%" y2="100%">' +
-    '<stop offset="0%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.3"/>' +
-    '<stop offset="100%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.05"/>' +
-    '</linearGradient></defs>' +
-    gridLines + yLabelsSvg +
-    '<path d="' + areaPath + '" fill="url(#areaGrad)"/>' +
-    '<path d="' + linePath + '" fill="none" stroke="var(--vscode-charts-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-    circles +
-    '<text x="' + pad.left + '" y="' + (height - 5) + '" text-anchor="start" fill="var(--vscode-descriptionForeground)" font-size="9">' + formatTime(ordered[0].timestamp, true) + '</text>' +
-    '<text x="' + (width - pad.right) + '" y="' + (height - 5) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">now</text>' +
-    '</svg>' +
-    '<div class="chart-footnote">' + t("{0} snapshots · Based on local refreshes", count) + '</div>' +
-    '</div>';
+  return {
+    model,
+    title: t("AI Credits Over Time"),
+    legendHtml: "",
+    footnoteHtml: '<div class="chart-footnote">' + t("{0} snapshots · Based on local refreshes", count) + '</div>',
+  };
 }
 
 /**
- * Renders a sprint-style burn-down chart for the current billing period.
+ * Builds the sprint-style burn-down chart model for the current billing period.
  *
  * The billing window acts as the "sprint": it starts roughly one calendar
  * month before the quota reset date and ends on the reset date. The ideal
@@ -890,31 +934,31 @@ function renderSnapshotChart(snapshots: readonly LocalSnapshot[]): string {
  * and the actual line plots recorded snapshots against it so users can see
  * at a glance whether they are pacing ahead of or behind budget.
  *
- * Returns an empty string when the data needed to anchor the sprint window
- * (a valid reset date and a positive entitlement) is unavailable, so the
- * caller can fall back to the time-based chart.
+ * Returns null when the data needed to anchor the sprint window (a valid
+ * reset date and a positive entitlement) is unavailable, so the caller can
+ * fall back to the time-based chart.
  */
-function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSnapshot[]): string {
+function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly LocalSnapshot[]): ChartResult | null {
   if (snapshots.length < 2) {
-    return "";
+    return null;
   }
 
   // The most recent snapshot defines the current sprint's total budget.
   const validSnapshots = snapshots.filter(s => s.premium_entitlement > 0);
   if (validSnapshots.length < 2) {
-    return "";
+    return null;
   }
 
   const entitlement = validSnapshots[0].premium_entitlement;
   if (!(entitlement > 0)) {
-    return "";
+    return null;
   }
 
   // Anchor the sprint window to the reset date. Without it we can't draw an
   // ideal burn line, so the caller falls back to the time-based chart.
   const resetTime = new Date(data.quota_reset_date_utc).getTime();
   if (!Number.isFinite(resetTime)) {
-    return "";
+    return null;
   }
 
   // Sprint start = one calendar month before the reset date.
@@ -923,7 +967,7 @@ function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSna
   const startTime = startDate.getTime();
   const periodMs = resetTime - startTime;
   if (!(periodMs > 0)) {
-    return "";
+    return null;
   }
 
   const now = Date.now();
@@ -932,8 +976,8 @@ function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSna
   // Keep only snapshots that fall inside the current sprint window, oldest first.
   const realInWindow = validSnapshots
     .filter(s => {
-      const t = new Date(s.timestamp).getTime();
-      return Number.isFinite(t) && t >= startTime && t <= resetTime;
+      const ts = new Date(s.timestamp).getTime();
+      return Number.isFinite(ts) && ts >= startTime && ts <= resetTime;
     })
     .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
     .sort((a, b) => a.t - b.t);
@@ -947,61 +991,38 @@ function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSna
   }
 
   if (inWindow.length < 2) {
-    return "";
+    return null;
   }
 
-  const width = 280;
-  const height = 120;
-  const pad = { top: 12, right: 12, bottom: 28, left: 40 };
-  const cw = width - pad.left - pad.right;
-  const ch = height - pad.top - pad.bottom;
-
-  const xAt = (t: number) => pad.left + (clamp(t, startTime, resetTime) - startTime) / periodMs * cw;
-  const yAt = (remaining: number) => pad.top + ch - clamp(remaining, 0, entitlement) / entitlement * ch;
+  const series: ChartSeries[] = [];
 
   // Ideal burn line: full entitlement at sprint start -> 0 at reset.
-  const idealStart = { x: pad.left, y: yAt(entitlement) };
-  const idealEnd = { x: pad.left + cw, y: yAt(0) };
+  series.push({
+    role: "ideal",
+    label: t("Ideal"),
+    points: [
+      { x: startTime, y: entitlement },
+      { x: resetTime, y: 0 },
+    ],
+    fill: false,
+    dashed: true,
+    showPoints: false,
+    tooltip: false,
+  });
 
   // Actual burn line from recorded snapshots.
-  const pts = inWindow.map(s => ({ x: xAt(s.t), y: yAt(s.remaining) }));
-  let actualPath = "";
-  pts.forEach((p, i) => {
-    actualPath += (i === 0 ? "M" : "L") + " " + p.x.toFixed(1) + " " + p.y.toFixed(1) + " ";
-  });
-  const lastPt = pts[pts.length - 1];
-  const areaPath = actualPath + "L " + lastPt.x.toFixed(1) + " " + (height - pad.bottom) + " L " + pts[0].x.toFixed(1) + " " + (height - pad.bottom) + " Z";
-
-  // Grid + y-axis labels (0, half, full entitlement).
-  const yLabels = [
-    { val: Math.round(entitlement), y: pad.top },
-    { val: Math.round(entitlement / 2), y: pad.top + ch / 2 },
-    { val: 0, y: pad.top + ch }
-  ];
-  let gridLines = "";
-  let yLabelsSvg = "";
-  yLabels.forEach(l => {
-    gridLines += '<line x1="' + pad.left + '" y1="' + l.y + '" x2="' + (width - pad.right) + '" y2="' + l.y + '" stroke="var(--vscode-panel-border)" stroke-dasharray="2,2" opacity="0.5"/>';
-    yLabelsSvg += '<text x="' + (pad.left - 5) + '" y="' + (l.y + 3) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + l.val + '</text>';
-  });
-
-  // "Today" marker (only when we're inside the sprint window).
-  let todayMarker = "";
-  if (now >= startTime && now <= resetTime) {
-    const tx = xAt(now).toFixed(1);
-    todayMarker =
-      '<line x1="' + tx + '" y1="' + pad.top + '" x2="' + tx + '" y2="' + (pad.top + ch) + '" stroke="var(--vscode-charts-orange)" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>' +
-      '<text x="' + tx + '" y="' + (pad.top - 3) + '" text-anchor="middle" fill="var(--vscode-charts-orange)" font-size="8">today</text>';
-  }
-
-  let circles = "";
-  pts.forEach(p => {
-    circles += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="var(--vscode-charts-blue)" class="chart-point"/>';
+  series.push({
+    role: "actual",
+    label: t("Actual"),
+    points: inWindow.map(s => ({ x: s.t, y: clamp(s.remaining, 0, entitlement) })),
+    fill: true,
+    dashed: false,
+    showPoints: true,
+    tooltip: true,
   });
 
   // Trend line: project the observed burn rate forward to the reset date (or
   // to the point where credits would hit zero, whichever comes first).
-  let trendLine = "";
   let trendLegend = "";
   let trendFootnote = "";
   const rateSource = realInWindow.length >= 2 ? realInWindow : inWindow;
@@ -1023,17 +1044,41 @@ function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSna
       endRemaining = lastTrend.remaining - ratePerMs * (resetTime - lastTrend.t);
     }
 
-    const tx1 = xAt(lastTrend.t).toFixed(1);
-    const ty1 = yAt(lastTrend.remaining).toFixed(1);
-    const tx2 = xAt(endTime).toFixed(1);
-    const ty2 = yAt(endRemaining).toFixed(1);
-    trendLine = '<line x1="' + tx1 + '" y1="' + ty1 + '" x2="' + tx2 + '" y2="' + ty2 + '" stroke="var(--vscode-charts-purple)" stroke-width="2.5" stroke-linecap="round" opacity="1"/>';
+    series.push({
+      role: "trend",
+      label: t("Trend"),
+      points: [
+        { x: lastTrend.t, y: clamp(lastTrend.remaining, 0, entitlement) },
+        { x: endTime, y: clamp(endRemaining, 0, entitlement) },
+      ],
+      fill: false,
+      dashed: false,
+      showPoints: false,
+      tooltip: false,
+    });
     trendLegend = '<span class="legend-item"><span class="legend-swatch legend-trend"></span>' + t("Trend") + '</span>';
 
     if (zeroTime < resetTime) {
       const d = new Date(zeroTime);
       trendFootnote = ' · ' + t("projected to run out {0}", (d.getMonth() + 1) + '/' + d.getDate());
     }
+  }
+
+  // "Today" marker (only when we're inside the sprint window): a vertical line
+  // drawn as a two-point series spanning the full height.
+  if (now >= startTime && now <= resetTime) {
+    series.push({
+      role: "today",
+      label: "today",
+      points: [
+        { x: now, y: 0 },
+        { x: now, y: entitlement },
+      ],
+      fill: false,
+      dashed: true,
+      showPoints: false,
+      tooltip: false,
+    });
   }
 
   // On-track status: compare actual remaining now vs the ideal line at "now".
@@ -1057,34 +1102,38 @@ function renderBurndownChart(data: CopilotUserData, snapshots: readonly LocalSna
     statusColor = "var(--vscode-descriptionForeground)";
   }
 
-  const fmtDate = (t: number) => {
-    const d = new Date(t);
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms);
     return (d.getMonth() + 1) + "/" + d.getDate();
   };
 
-  return '<div class="snapshot-chart">' +
-    '<div class="chart-title">' + t("AI Credits Burn-down") + '</div>' +
-    '<svg width="' + width + '" height="' + height + '" class="history-chart">' +
-    '<defs><linearGradient id="burnAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">' +
-    '<stop offset="0%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.3"/>' +
-    '<stop offset="100%" style="stop-color:var(--vscode-charts-blue);stop-opacity:0.05"/>' +
-    '</linearGradient></defs>' +
-    gridLines + yLabelsSvg +
-    // Ideal burn line (subtle dashed reference).
-    '<line x1="' + idealStart.x.toFixed(1) + '" y1="' + idealStart.y.toFixed(1) + '" x2="' + idealEnd.x.toFixed(1) + '" y2="' + idealEnd.y.toFixed(1) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="1" stroke-dasharray="5,4" opacity="0.5"/>' +
-    todayMarker +
-    '<path d="' + areaPath + '" fill="url(#burnAreaGrad)"/>' +
-    '<path d="' + actualPath + '" fill="none" stroke="var(--vscode-charts-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-    trendLine +
-    circles +
-    '<text x="' + pad.left + '" y="' + (height - 5) + '" text-anchor="start" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(startTime) + '</text>' +
-    '<text x="' + (width - pad.right) + '" y="' + (height - 5) + '" text-anchor="end" fill="var(--vscode-descriptionForeground)" font-size="9">' + fmtDate(resetTime) + ' (reset)</text>' +
-    '</svg>' +
+  const model: ChartModel = {
+    kind: "burndown",
+    series,
+    xMin: startTime,
+    xMax: resetTime,
+    yMin: 0,
+    yMax: entitlement,
+    xTicks: [
+      { value: startTime, label: fmtDate(startTime) },
+      { value: resetTime, label: fmtDate(resetTime) + ' (reset)' },
+    ],
+    yTicks: [0, entitlement / 2, entitlement],
+    unit: t("credits"),
+  };
+
+  const legendHtml =
     '<div class="burndown-legend">' +
     '<span class="legend-item"><span class="legend-swatch legend-actual"></span>' + t("Actual") + '</span>' +
     '<span class="legend-item"><span class="legend-swatch legend-ideal"></span>' + t("Ideal") + '</span>' +
     trendLegend +
-    '</div>' +
-    '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + trendFootnote + '</div>' +
     '</div>';
+  const footnoteHtml = '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + trendFootnote + '</div>';
+
+  return {
+    model,
+    title: t("AI Credits Burn-down"),
+    legendHtml,
+    footnoteHtml,
+  };
 }
