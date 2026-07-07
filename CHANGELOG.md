@@ -1,5 +1,10 @@
 # Change Log
 
+# [4.6.6] - 2026-07-07
+
+### Changed
+- **Plan Details UI**: refreshed the sidebar plan summary with a stronger plan highlight, compact feature access indicators, organization count context, and responsive layout behavior for narrow views.
+
 # [4.6.5] - 2026-07-06
 
 ### Added

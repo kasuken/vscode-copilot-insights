@@ -217,34 +217,39 @@ export function buildViewModel(
 function renderSummarySection(data: CopilotUserData): string {
   const orgCount = data.organization_list?.length || 0;
   const enabledText = (value: boolean) => (value ? t("Enabled") : t("Disabled"));
+  const statusClass = (value: boolean) => (value ? "is-enabled" : "is-disabled");
 
   return `
 		<div class="section">
 			<h2 class="section-title">${t("Plan Details")}</h2>
-			<div class="summary-cards">
-				<div class="summary-card">
+      <div class="plan-summary">
+        <div class="summary-card summary-card-primary">
 					<div class="card-label" title="${t("Your GitHub Copilot subscription plan")}">${t("Plan")}</div>
 					<div class="card-value">${escapeHtml(data.copilot_plan) || t("Unknown")}</div>
+          <div class="card-meta">${t("Copilot access for this account")}</div>
 				</div>
-				<div class="summary-card">
-					<div class="card-label" title="${t("Access to Copilot Chat features")}">${t("Chat")}</div>
-					<div class="card-value">${enabledText(data.chat_enabled)}</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label" title="${t("Access to Copilot CLI features")}">${t("CLI")}</div>
-					<div class="card-value">${enabledText(data.cli_enabled)}</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label" title="${t("Model Context Protocol support")}">${t("MCP")}</div>
-					<div class="card-value">${enabledText(data.is_mcp_enabled)}</div>
-				</div>
-				<div class="summary-card">
-					<div class="card-label" title="${t("Editor preview features access")}">${t("Preview")}</div>
-					<div class="card-value">${enabledText(data.editor_preview_features_enabled)}</div>
-				</div>
-				<div class="summary-card">
+        <div class="summary-access-grid" aria-label="${t("Copilot feature access")}">
+          <div class="access-pill ${statusClass(data.chat_enabled)}" title="${t("Access to Copilot Chat features")}">
+            <span class="access-name">${t("Chat")}</span>
+            <span class="access-state">${enabledText(data.chat_enabled)}</span>
+          </div>
+          <div class="access-pill ${statusClass(data.cli_enabled)}" title="${t("Access to Copilot CLI features")}">
+            <span class="access-name">${t("CLI")}</span>
+            <span class="access-state">${enabledText(data.cli_enabled)}</span>
+          </div>
+          <div class="access-pill ${statusClass(data.is_mcp_enabled)}" title="${t("Model Context Protocol support")}">
+            <span class="access-name">${t("MCP")}</span>
+            <span class="access-state">${enabledText(data.is_mcp_enabled)}</span>
+          </div>
+          <div class="access-pill ${statusClass(data.editor_preview_features_enabled)}" title="${t("Editor preview features access")}">
+            <span class="access-name">${t("Preview")}</span>
+            <span class="access-state">${enabledText(data.editor_preview_features_enabled)}</span>
+          </div>
+        </div>
+        <div class="summary-card summary-card-compact">
 					<div class="card-label" title="${t("Organizations providing your Copilot seat")}">${t("Orgs")}</div>
-					<div class="card-value">${orgCount}${orgCount > 1 ? " 🔗" : ""}</div>
+          <div class="card-value">${orgCount}</div>
+          <div class="card-meta">${orgCount === 1 ? t("organization") : t("organizations")}</div>
 				</div>
 			</div>
 		</div>

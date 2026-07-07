@@ -66,9 +66,9 @@ body {
 	border-radius: 2px;
 	font-size: 12px;
 }
-.summary-cards {
+.plan-summary {
 	display: grid;
-	grid-template-columns: 1fr 1fr 1fr;
+	grid-template-columns: minmax(140px, 1.1fr) minmax(180px, 1.6fr) minmax(80px, 0.7fr);
 	gap: 8px;
 	margin-bottom: 16px;
 	box-sizing: border-box;
@@ -77,7 +77,15 @@ body {
 	background-color: var(--vscode-editor-background);
 	border: 1px solid var(--vscode-panel-border);
 	border-radius: 4px;
-	padding: 8px;
+	padding: 10px;
+}
+.summary-card-primary {
+	border-left: 3px solid var(--vscode-charts-blue);
+}
+.summary-card-compact {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
 }
 .card-label {
 	font-size: 11px;
@@ -85,8 +93,66 @@ body {
 	margin-bottom: 4px;
 }
 .card-value {
-	font-size: 14px;
+	font-size: 18px;
 	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+.card-meta {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 4px;
+}
+.summary-access-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+}
+.access-pill {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-width: 0;
+	background-color: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	padding: 8px 10px;
+}
+.access-pill::before {
+	content: "";
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background-color: var(--vscode-descriptionForeground);
+	flex: 0 0 auto;
+}
+.access-pill.is-enabled::before {
+	background-color: var(--vscode-charts-green);
+}
+.access-pill.is-disabled::before {
+	background-color: var(--vscode-errorForeground);
+}
+.access-name {
+	font-size: 12px;
+	font-weight: 600;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.access-state {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-left: auto;
+}
+@media (max-width: 460px) {
+	.plan-summary {
+		grid-template-columns: 1fr;
+	}
+
+	.summary-access-grid {
+		grid-template-columns: 1fr;
+	}
 }
 .section {
 	margin-bottom: 16px;
