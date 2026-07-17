@@ -305,8 +305,11 @@
     }
   });
 
-  document.getElementById("signInButton").addEventListener("click", () => {
-    vscode.postMessage({ command: "signIn" });
+  document.getElementById("signInGithubButton").addEventListener("click", () => {
+    vscode.postMessage({ command: "signIn", providerId: "github" });
+  });
+  document.getElementById("signInGheButton").addEventListener("click", () => {
+    vscode.postMessage({ command: "signIn", providerId: "github-enterprise" });
   });
   document.getElementById("copyButton").addEventListener("click", () => {
     vscode.postMessage({ command: "copyToClipboard" });

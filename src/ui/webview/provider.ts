@@ -192,9 +192,14 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
             );
           }
           break;
-        case "signIn":
-          await this.loadCopilotData();
+        case "signIn": {
+          const preferredProvider =
+            message.providerId === "github" || message.providerId === "github-enterprise"
+              ? message.providerId
+              : undefined;
+          await this.loadCopilotData({ preferredProvider });
           break;
+        }
       }
     });
 
@@ -209,7 +214,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this.loadCopilotData();
   }
 
-  public async loadCopilotData(options: { silent?: boolean } = {}) {
+  public async loadCopilotData(options: { silent?: boolean; preferredProvider?: GithubProviderId } = {}) {
     if (this._isLoadingCopilotData) {
       return;
     }
@@ -220,7 +225,10 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       // Get GitHub authentication session.
       // Silent loads (startup, background polling) never prompt the user;
       // interactive loads (opening the view, manual refresh) may show the sign-in flow.
-      const session = await this._getGitHubSession(options.silent === true);
+      const session = await this._getGitHubSession(
+        options.silent === true,
+        options.preferredProvider
+      );
 
       if (!session) {
         if (options.silent) {
@@ -289,7 +297,10 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this._postState(model);
   }
 
-  private async _getGitHubSession(silent: boolean): Promise<vscode.AuthenticationSession | undefined> {
+  private async _getGitHubSession(
+    silent: boolean,
+    preferredProvider?: GithubProviderId
+  ): Promise<vscode.AuthenticationSession | undefined> {
     const config = vscode.workspace.getConfiguration("copilotInsights");
     const authProvider = config.get<string>("authProvider", "auto");
     const scopes = ["user:email"];
@@ -299,9 +310,11 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         ? authProvider
         : undefined;
 
-    const candidates = configuredProvider
-      ? [configuredProvider]
-      : [...GITHUB_PROVIDER_IDS];
+    const candidates = preferredProvider
+      ? [preferredProvider]
+      : configuredProvider
+        ? [configuredProvider]
+        : [...GITHUB_PROVIDER_IDS];
 
     for (const providerId of candidates) {
       const existingSession = await vscode.authentication.getSession(providerId, scopes, {
@@ -317,7 +330,8 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       return undefined;
     }
 
-    const providerForInteractiveSignIn = configuredProvider ?? (await this._pickAuthProviderForSignIn());
+    const providerForInteractiveSignIn =
+      preferredProvider ?? configuredProvider ?? (await this._pickAuthProviderForSignIn());
     if (!providerForInteractiveSignIn) {
       return undefined;
     }

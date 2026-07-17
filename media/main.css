@@ -37,8 +37,21 @@ body {
 	font-size: 13px;
 	font-family: var(--vscode-font-family);
 }
+.signin-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	justify-content: center;
+}
+.signin button.secondary {
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
 .signin button:hover {
 	background-color: var(--vscode-button-hoverBackground);
+}
+.signin button.secondary:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
 }
 .error {
 	color: var(--vscode-errorForeground);
