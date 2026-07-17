@@ -18,6 +18,9 @@ import {
   WebviewStateMessage,
 } from "./render";
 
+const GITHUB_PROVIDER_IDS = ["github", "github-enterprise"] as const;
+type GithubProviderId = (typeof GITHUB_PROVIDER_IDS)[number];
+
 export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = "copilotInsights.sidebarView";
 
@@ -70,13 +73,11 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this._context.subscriptions.push(configurationChangeDisposable);
 
     // Refresh silently when GitHub authentication sessions change (sign-in/out)
-    const sessionChangeDisposable = vscode.authentication.onDidChangeSessions(
-      (event) => {
-        if (event.provider.id === "github") {
-          void this.loadCopilotData({ silent: true });
-        }
+    const sessionChangeDisposable = vscode.authentication.onDidChangeSessions((event) => {
+      if (GITHUB_PROVIDER_IDS.includes(event.provider.id as GithubProviderId)) {
+        void this.loadCopilotData({ silent: true });
       }
-    );
+    });
     this._context.subscriptions.push(sessionChangeDisposable);
 
     this._restartPolling();
@@ -219,13 +220,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       // Get GitHub authentication session.
       // Silent loads (startup, background polling) never prompt the user;
       // interactive loads (opening the view, manual refresh) may show the sign-in flow.
-      const session = await vscode.authentication.getSession(
-        "github",
-        ["user:email"],
-        options.silent
-          ? { createIfNone: false, silent: true }
-          : { createIfNone: true }
-      );
+      const session = await this._getGitHubSession(options.silent === true);
 
       if (!session) {
         if (options.silent) {
@@ -241,7 +236,10 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         return;
       }
 
-      const data = await fetchCopilotUserData(session.accessToken);
+      const apiBaseUrl = vscode.workspace
+        .getConfiguration("copilotInsights")
+        .get<string>("apiBaseUrl", "https://api.github.com");
+      const data = await fetchCopilotUserData(session.accessToken, apiBaseUrl);
 
       // Record snapshot for history tracking (per GitHub account)
       this._snapshots.setAccount(data.login);
@@ -289,6 +287,66 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private _publishData(data: CopilotUserData) {
     const model = buildViewModel(data, this._snapshots.snapshots, this._getRenderConfig());
     this._postState(model);
+  }
+
+  private async _getGitHubSession(silent: boolean): Promise<vscode.AuthenticationSession | undefined> {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    const authProvider = config.get<string>("authProvider", "auto");
+    const scopes = ["user:email"];
+
+    const configuredProvider =
+      authProvider === "github" || authProvider === "github-enterprise"
+        ? authProvider
+        : undefined;
+
+    const candidates = configuredProvider
+      ? [configuredProvider]
+      : [...GITHUB_PROVIDER_IDS];
+
+    for (const providerId of candidates) {
+      const existingSession = await vscode.authentication.getSession(providerId, scopes, {
+        createIfNone: false,
+        silent: true,
+      });
+      if (existingSession) {
+        return existingSession;
+      }
+    }
+
+    if (silent) {
+      return undefined;
+    }
+
+    const providerForInteractiveSignIn = configuredProvider ?? (await this._pickAuthProviderForSignIn());
+    if (!providerForInteractiveSignIn) {
+      return undefined;
+    }
+
+    return vscode.authentication.getSession(providerForInteractiveSignIn, scopes, {
+      createIfNone: true,
+    });
+  }
+
+  private async _pickAuthProviderForSignIn(): Promise<GithubProviderId | undefined> {
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: vscode.l10n.t("GitHub.com"),
+          description: vscode.l10n.t("Use your github.com account"),
+          providerId: "github" as const,
+        },
+        {
+          label: vscode.l10n.t("GitHub Enterprise"),
+          description: vscode.l10n.t("Use your GitHub Enterprise account"),
+          providerId: "github-enterprise" as const,
+        },
+      ],
+      {
+        placeHolder: vscode.l10n.t("Choose an authentication provider for Copilot Insights"),
+      }
+    );
+
+    return choice?.providerId;
   }
 
   private _publishError(error: string) {

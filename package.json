@@ -138,6 +138,26 @@
           "minimum": 0,
           "description": "%copilotInsights.config.pollingIntervalSeconds.description%"
         },
+        "copilotInsights.authProvider": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "github",
+            "github-enterprise"
+          ],
+          "enumDescriptions": [
+            "%copilotInsights.config.authProvider.auto%",
+            "%copilotInsights.config.authProvider.github%",
+            "%copilotInsights.config.authProvider.githubEnterprise%"
+          ],
+          "description": "%copilotInsights.config.authProvider.description%"
+        },
+        "copilotInsights.apiBaseUrl": {
+          "type": "string",
+          "default": "https://api.github.com",
+          "description": "%copilotInsights.config.apiBaseUrl.description%"
+        },
         "copilotInsights.statusBarLocation": {
           "type": "string",
           "default": "right",

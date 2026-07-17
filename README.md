@@ -160,6 +160,13 @@ Copilot Insights uses VS Code's built-in GitHub authentication provider and requ
 
 - `https://api.github.com/copilot_internal/user`
 
+For GitHub Enterprise, configure:
+
+- `copilotInsights.authProvider`: set to `github-enterprise` (or keep `auto`)
+- `copilotInsights.apiBaseUrl`: your enterprise API base URL (for example `https://ghe.example.com/api/v3`)
+
+The extension appends `/copilot_internal/user` to the configured API base URL.
+
 The extension stores a small local history of recent AI credit snapshots in VS Code global state so it can show trend and prediction views. No external service is used by this extension to store your quota history.
 
 ## Troubleshooting
@@ -169,6 +176,7 @@ The extension stores a small local history of recent AI credit snapshots in VS C
 - Make sure you are signed into the correct GitHub account in VS Code.
 - Confirm your account has GitHub Copilot access.
 - Trigger a manual refresh from the view title bar or command palette.
+- For GitHub Enterprise, set `copilotInsights.authProvider` to `github-enterprise` and configure `copilotInsights.apiBaseUrl`.
 
 ### GitHub API returns 403 or 404
 
