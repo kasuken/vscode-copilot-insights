@@ -129,7 +129,10 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 
 	<div id="state-signin" class="state signin hidden">
 		<p>${t("Sign in with GitHub to see your Copilot plan, quotas, and usage insights.")}</p>
-		<button id="signInButton">${t("Sign in with GitHub")}</button>
+    <div class="signin-actions">
+      <button id="signInGithubButton">${t("Sign in with GitHub")}</button>
+      <button id="signInGheButton" class="secondary">${t("Sign in with GHE")}</button>
+    </div>
 	</div>
 
 	<div id="state-error" class="state hidden">

@@ -1,6 +1,13 @@
 import { CopilotUserData } from "../types";
 
-const COPILOT_USER_ENDPOINT = "https://api.github.com/copilot_internal/user";
+const DEFAULT_COPILOT_API_BASE_URL = "https://api.github.com";
+
+function buildCopilotUserEndpoint(apiBaseUrl?: string): string {
+  const trimmedBase = (apiBaseUrl ?? DEFAULT_COPILOT_API_BASE_URL)
+    .trim()
+    .replace(/\/+$/, "");
+  return `${trimmedBase}/copilot_internal/user`;
+}
 
 function normalizeCopilotPlan(plan: unknown): string {
   const value = typeof plan === "string" ? plan.trim() : "";
@@ -14,8 +21,11 @@ function normalizeCopilotPlan(plan: unknown): string {
  * Fetches and normalizes the Copilot account/quota data for the
  * authenticated user from GitHub's (internal, undocumented) endpoint.
  */
-export async function fetchCopilotUserData(accessToken: string): Promise<CopilotUserData> {
-  const response = await fetch(COPILOT_USER_ENDPOINT, {
+export async function fetchCopilotUserData(
+  accessToken: string,
+  apiBaseUrl?: string
+): Promise<CopilotUserData> {
+  const response = await fetch(buildCopilotUserEndpoint(apiBaseUrl), {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
