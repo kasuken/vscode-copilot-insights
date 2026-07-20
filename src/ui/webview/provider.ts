@@ -64,7 +64,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       if (affectedVisual && this._lastData) {
         // Update the status bar and sidebar with the cached data
-        this._statusBar.update(this._lastData);
+        this._statusBar.update(this._lastData, this._snapshots.snapshots);
         this._publishData(this._lastData);
       }
 
@@ -316,7 +316,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       this._lastData = data;
       this._lastSuccessfulFetchMs = Date.now();
-      this._statusBar.update(data);
+      this._statusBar.update(data, this._snapshots.snapshots);
       this._publishData(data);
       this._maybeNotifyPremiumUsage(data);
       getLog().debug(`Copilot data refreshed for ${data.login || "unknown user"}`);

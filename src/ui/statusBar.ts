@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
-import { CopilotUserData, QuotaSnapshot, StatusBadge } from "../types";
+import { CopilotUserData, LocalSnapshot, QuotaSnapshot, StatusBadge } from "../types";
 import { formatQuotaValue } from "../core/format";
+import { getUsedToday } from "../core/history";
+import { buildDailyUsageSparkline } from "../core/sparkline";
 import {
   calculateDaysUntilReset,
   computeQuotaStats,
@@ -145,6 +147,7 @@ export class StatusBarManager implements vscode.Disposable {
   private readonly _leftItem: vscode.StatusBarItem;
   private _previewStyle?: string;
   private _lastData?: CopilotUserData;
+  private _lastSnapshots?: readonly LocalSnapshot[];
 
   constructor() {
     this._rightItem = vscode.window.createStatusBarItem(
@@ -237,8 +240,11 @@ export class StatusBarManager implements vscode.Disposable {
     }
   }
 
-  update(data: CopilotUserData) {
+  update(data: CopilotUserData, snapshots?: readonly LocalSnapshot[]) {
     this._lastData = data;
+    if (snapshots) {
+      this._lastSnapshots = snapshots;
+    }
     this.updateVisibility();
 
     const config = vscode.workspace.getConfiguration("copilotInsights");
@@ -255,6 +261,7 @@ export class StatusBarManager implements vscode.Disposable {
       const customLimitNote = hasCustomLimit
         ? `\n• ${t("Custom limit: **{0}** (plan: {1})", eq.entitlement, premiumQuota.entitlement)}`
         : '';
+      const historyNote = this._buildHistoryTooltipLines();
 
       const textOptions: StatusBarTextOptions = {
         style: this._previewStyle ?? config.get<string>("statusBarStyle", "detailed-original"),
@@ -291,7 +298,7 @@ export class StatusBarManager implements vscode.Disposable {
           : `• ${t("Remaining: **{0}** of **{1}** ({2}%)", eq.remaining, eq.entitlement, percentRemaining)}\n`) +
         `• ${t("Reset in: **{0}d {1}h**", timeUntilReset.days, timeUntilReset.hours)}\n` +
         `• ${t("Plan: **{0}**", data.copilot_plan)}` +
-        customLimitNote + `\n\n` +
+        customLimitNote + historyNote + `\n\n` +
         `_${t("Click to view full details")}_`
       );
 
@@ -304,7 +311,7 @@ export class StatusBarManager implements vscode.Disposable {
           ? `• ${t("Over by: **{0}**", overageAmount)}\n`
           : `• ${t("Remaining: **{0}** ({1}%)", eq.remaining, percentRemaining)}\n`) +
         `• ${t("Status: **{0}** {1}", t(statusBadge.label), statusBadge.emoji)}` +
-        customLimitNote + `\n\n` +
+        customLimitNote + historyNote + `\n\n` +
         `_${t("Click to view full details")}_`
       );
     } else {
@@ -323,6 +330,33 @@ export class StatusBarManager implements vscode.Disposable {
         item.backgroundColor = undefined;
       }
     }
+  }
+
+  /**
+   * Builds the optional tooltip lines derived from the local snapshot
+   * history: credits used since local midnight and a 7-day usage sparkline.
+   * Returns an empty string when no history data is available.
+   */
+  private _buildHistoryTooltipLines(): string {
+    const snapshots = this._lastSnapshots;
+    if (!snapshots || snapshots.length === 0) {
+      return "";
+    }
+
+    const t = vscode.l10n.t;
+    let lines = "";
+
+    const usedToday = getUsedToday(snapshots);
+    if (usedToday !== null) {
+      lines += `\n• ${t("Used today: **{0}** credits", usedToday)}`;
+    }
+
+    const sparkline = buildDailyUsageSparkline(snapshots);
+    if (sparkline !== null) {
+      lines += `\n• ${t("Last 7 days: {0}", `\`${sparkline}\``)}`;
+    }
+
+    return lines;
   }
 
   /**
