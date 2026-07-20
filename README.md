@@ -103,6 +103,7 @@ You can also package and install locally from a VSIX during development.
 - Copilot Insights: Open Settings
 - Copilot Insights: Reset to Defaults
 - Copilot Insights: Choose Status Bar Style (with live preview)
+- Copilot Insights: Show Organization Metrics (opt-in, requires `copilotInsights.organization`)
 - Copilot Insights: Export Snapshot History (JSON or CSV)
 - Copilot Insights: Clear Snapshot History
 - Copilot Insights: Show Logs
@@ -110,6 +111,12 @@ You can also package and install locally from a VSIX during development.
 ## Copilot Chat integration
 
 Ask Copilot Chat about your quota — reference the `#copilotQuota` tool in your prompt (or just ask "how many AI credits do I have left?" in agent mode) and it will answer using your live quota data.
+
+You can also chat with the `@insights` participant directly:
+
+- `@insights /quota` — your current plan and AI credit quota.
+- `@insights /pacing` — how your usage compares to the pace needed to last until reset.
+- `@insights /forecast` — a projection of when your credits will run out.
 
 ## Configuration
 
@@ -129,6 +136,9 @@ Key settings:
 - `copilotInsights.customCreditLimit`: Budget against a custom AI credit limit above your plan entitlement.
 - `copilotInsights.alertThresholds`: Usage percentages that trigger a warning notification (default `[85]`), each once per billing period.
 - `copilotInsights.dailyBudget`: Optional daily AI credit budget shown against today's usage.
+- `copilotInsights.notifyOnReset`: Show a notification when your billing period rolls over and the quota resets.
+- `copilotInsights.autoExport.enabled` / `copilotInsights.autoExport.folder` / `copilotInsights.autoExport.format`: Automatically export the local snapshot history to a file (JSON or CSV) once per day.
+- `copilotInsights.organization`: GitHub organization slug for the opt-in organization Copilot metrics command.
 
 Example:
 

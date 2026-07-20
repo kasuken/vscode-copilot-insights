@@ -3,6 +3,10 @@ import * as vscode from "vscode";
 import { StatusBarManager } from "./ui/statusBar";
 import { CopilotInsightsViewProvider } from "./ui/webview/provider";
 import { CopilotQuotaTool } from "./lmTool";
+import { registerChatParticipant } from "./chatParticipant";
+import { fetchOrgCopilotMetrics } from "./api/orgMetricsApi";
+import { buildOrgMetricsMarkdown } from "./core/orgMetrics";
+import { serializeHistory } from "./core/exporter";
 import { getLog } from "./log";
 
 /** Runs one-time settings migrations, guarded by global-state flags. */
@@ -68,6 +72,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.lm.registerTool("insights_getCopilotQuota", new CopilotQuotaTool(provider))
   );
 
+  // Chat participant so users can ask @insights about quota, pacing, forecast
+  registerChatParticipant(context, provider);
+
   // Trigger initial data load to populate status bars.
   // Silent: never prompt for GitHub sign-in at startup — interactive auth
   // happens when the user opens the view or refreshes manually.
@@ -117,10 +124,16 @@ export function activate(context: vscode.ExtensionContext) {
           "customCreditLimit",
           "alertThresholds",
           "dailyBudget",
+          "notifyOnReset",
+          "autoExport.enabled",
+          "autoExport.folder",
+          "autoExport.format",
         ];
-        for (const setting of settings) {
-          await config.update(setting, undefined, vscode.ConfigurationTarget.Global);
-        }
+        await Promise.all(
+          settings.map((setting) =>
+            config.update(setting, undefined, vscode.ConfigurationTarget.Global)
+          )
+        );
 
         vscode.window.showInformationMessage(
           vscode.l10n.t("Copilot Insights settings reset to defaults.")
@@ -165,12 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const content = format.ext === "json"
-        ? JSON.stringify(history, null, 2)
-        : [
-          "timestamp,premium_remaining,premium_entitlement",
-          ...history.map((s) => `${s.timestamp},${s.premium_remaining},${s.premium_entitlement}`),
-        ].join("\n");
+      const content = serializeHistory(history, format.ext === "json" ? "json" : "csv");
 
       await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf8"));
       getLog().info(`Exported ${history.length} snapshots to ${uri.fsPath}`);
@@ -226,16 +234,14 @@ export function activate(context: vscode.ExtensionContext) {
       const styleForItem = (item: vscode.QuickPickItem | undefined) =>
         styles.find((s) => s.label === item?.label)?.value;
 
-      let accepted = false;
       quickPick.onDidChangeActive((active) => {
         const style = styleForItem(active[0]);
         if (style) {
-          // Live preview: apply immediately; reverted on cancel
-          void config.update("statusBarStyle", style, vscode.ConfigurationTarget.Global);
+          // Live preview: in-memory only, no settings churn; cleared on hide
+          statusBar.previewStyle(style);
         }
       });
       quickPick.onDidAccept(() => {
-        accepted = true;
         const style = styleForItem(quickPick.selectedItems[0]);
         if (style) {
           void config.update("statusBarStyle", style, vscode.ConfigurationTarget.Global);
@@ -243,12 +249,58 @@ export function activate(context: vscode.ExtensionContext) {
         quickPick.hide();
       });
       quickPick.onDidHide(() => {
-        if (!accepted) {
-          void config.update("statusBarStyle", original, vscode.ConfigurationTarget.Global);
-        }
+        // Clear the in-memory preview: on accept the persisted setting takes
+        // over, on cancel this restores the configured style.
+        statusBar.previewStyle(undefined);
         quickPick.dispose();
       });
       quickPick.show();
+    }
+  );
+
+  // Opt-in: fetch and show org-level Copilot metrics (official REST API).
+  // Only ever called from this command — never automatically.
+  const showOrgMetricsCommand = vscode.commands.registerCommand(
+    "vscode-copilot-insights.showOrgMetrics",
+    async () => {
+      const config = vscode.workspace.getConfiguration("copilotInsights");
+      let org = config.get<string>("organization", "").trim();
+
+      if (!org) {
+        const input = await vscode.window.showInputBox({
+          title: vscode.l10n.t("Copilot Insights: Organization Metrics"),
+          prompt: vscode.l10n.t("Enter the GitHub organization slug to fetch Copilot metrics for"),
+          placeHolder: vscode.l10n.t("e.g. my-org"),
+          ignoreFocusOut: true,
+        });
+        if (!input || !input.trim()) {
+          return;
+        }
+        org = input.trim();
+        await config.update("organization", org, vscode.ConfigurationTarget.Global);
+      }
+
+      try {
+        const session = await vscode.authentication.getSession(
+          "github",
+          ["read:org"],
+          { createIfNone: true }
+        );
+        const metrics = await fetchOrgCopilotMetrics(org, session.accessToken);
+        const content = buildOrgMetricsMarkdown(org, metrics);
+        const document = await vscode.workspace.openTextDocument({
+          language: "markdown",
+          content,
+        });
+        await vscode.window.showTextDocument(document, { preview: false });
+        getLog().info(`Fetched org Copilot metrics for '${org}' (${metrics.length} days)`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        getLog().error(`Failed to fetch org Copilot metrics for '${org}': ${message}`);
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("Failed to fetch Copilot metrics for '{0}': {1}", org, message)
+        );
+      }
     }
   );
 
@@ -267,6 +319,7 @@ export function activate(context: vscode.ExtensionContext) {
     exportHistoryCommand,
     clearHistoryCommand,
     chooseStyleCommand,
+    showOrgMetricsCommand,
     showLogsCommand
   );
 }

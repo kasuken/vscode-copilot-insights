@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { CopilotUserData, DEFAULT_POLLING_INTERVAL_SECONDS } from "../../types";
 import { fetchCopilotUserData } from "../../api/copilotApi";
@@ -8,6 +10,7 @@ import {
   normalizePollingIntervalSeconds,
 } from "../../core/quota";
 import { generateMarkdownSummary } from "../../core/markdown";
+import { ExportFormat, serializeHistory } from "../../core/exporter";
 import { SnapshotStore } from "../../core/history";
 import { getLog } from "../../log";
 import { StatusBarManager } from "../statusBar";
@@ -26,9 +29,20 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private _lastStateMessage: WebviewStateMessage = { state: "loading" };
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlerts";
+  private readonly _lastSeenResetDateKey =
+    "copilotInsights.lastSeenResetDate";
+  private readonly _alertSnoozeUntilKey =
+    "copilotInsights.alertSnoozeUntil";
+  private readonly _lastAutoExportDateKey =
+    "copilotInsights.lastAutoExportDate";
   private readonly _snapshots: SnapshotStore;
   private _pollingTimer?: ReturnType<typeof setInterval>;
   private _isLoadingCopilotData = false;
+  private _lastSuccessfulFetchMs = 0;
+  private _backoffMultiplier = 1;
+  private static readonly _maxBackoffMultiplier = 8;
+  /** Skip visibility/focus-triggered refreshes when data is fresher than this. */
+  private static readonly _visibilityFreshnessSeconds = 30;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -59,7 +73,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       if (affectedVisual && this._lastData) {
         // Update the status bar and sidebar with the cached data
-        this._statusBar.update(this._lastData);
+        this._statusBar.update(this._lastData, this._snapshots.snapshots);
         this._publishData(this._lastData);
       }
 
@@ -78,6 +92,21 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
     );
     this._context.subscriptions.push(sessionChangeDisposable);
+
+    // Focus-aware polling: pause background polling while the window is
+    // unfocused; resume (with a staleness-guarded silent refresh) on focus.
+    const windowStateDisposable = vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        this._restartPolling();
+        void this.loadCopilotData({
+          silent: true,
+          ifStalerThanSeconds: CopilotInsightsViewProvider._visibilityFreshnessSeconds,
+        });
+      } else {
+        this._clearPollingTimer();
+      }
+    });
+    this._context.subscriptions.push(windowStateDisposable);
 
     this._restartPolling();
   }
@@ -120,12 +149,32 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       return;
     }
 
+    // Back off while background refreshes keep failing (1x, 2x, 4x, 8x).
+    const effectiveSeconds = pollingIntervalSeconds * this._backoffMultiplier;
     this._pollingTimer = setInterval(() => {
-      void this.loadCopilotData({ silent: true });
-    }, pollingIntervalSeconds * 1000);
+      void this._pollOnce();
+    }, effectiveSeconds * 1000);
 
     if (refreshImmediately) {
-      void this.loadCopilotData({ silent: true });
+      void this._pollOnce();
+    }
+  }
+
+  /**
+   * Runs one background poll and adjusts the backoff multiplier: doubled
+   * (capped at 8x) after a failure, reset to 1x after a success.
+   */
+  private async _pollOnce() {
+    const succeeded = await this.loadCopilotData({ silent: true });
+    const nextMultiplier = succeeded
+      ? 1
+      : Math.min(
+        this._backoffMultiplier * 2,
+        CopilotInsightsViewProvider._maxBackoffMultiplier
+      );
+    if (nextMultiplier !== this._backoffMultiplier) {
+      this._backoffMultiplier = nextMultiplier;
+      this._restartPolling();
     }
   }
 
@@ -197,10 +246,14 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
     });
 
-    // Refresh Copilot data when view becomes visible
+    // Refresh Copilot data silently when the view becomes visible, unless
+    // the cached data is still fresh.
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
-        this.loadCopilotData();
+        void this.loadCopilotData({
+          silent: true,
+          ifStalerThanSeconds: CopilotInsightsViewProvider._visibilityFreshnessSeconds,
+        });
       }
     });
 
@@ -208,9 +261,28 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this.loadCopilotData();
   }
 
-  public async loadCopilotData(options: { silent?: boolean } = {}) {
+  /**
+   * Loads Copilot data and updates the status bar and webview.
+   *
+   * @param options.silent Never prompt for sign-in or surface errors to the user.
+   * @param options.ifStalerThanSeconds Skip the fetch entirely when the last
+   * successful fetch is more recent than this (used by visibility/focus
+   * handlers; manual refresh always fetches).
+   * @returns `false` when a fetch was attempted and failed, `true` otherwise.
+   */
+  public async loadCopilotData(
+    options: { silent?: boolean; ifStalerThanSeconds?: number } = {}
+  ): Promise<boolean> {
     if (this._isLoadingCopilotData) {
-      return;
+      return true;
+    }
+
+    if (
+      options.ifStalerThanSeconds !== undefined &&
+      this._lastSuccessfulFetchMs > 0 &&
+      Date.now() - this._lastSuccessfulFetchMs < options.ifStalerThanSeconds * 1000
+    ) {
+      return true;
     }
 
     this._isLoadingCopilotData = true;
@@ -238,7 +310,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         } else {
           this._publishError(vscode.l10n.t("Failed to authenticate with GitHub"));
         }
-        return;
+        return true;
       }
 
       const data = await fetchCopilotUserData(session.accessToken);
@@ -252,17 +324,21 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
 
       this._lastData = data;
-      this._statusBar.update(data);
+      this._lastSuccessfulFetchMs = Date.now();
+      this._statusBar.update(data, this._snapshots.snapshots);
       this._publishData(data);
       this._maybeNotifyPremiumUsage(data);
+      this._maybeNotifyQuotaReset(data);
+      void this._maybeAutoExportHistory();
       getLog().debug(`Copilot data refreshed for ${data.login || "unknown user"}`);
+      return true;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
 
       if (options.silent) {
         getLog().warn(`Background refresh failed: ${errorMessage}`);
-        return;
+        return false;
       }
 
       getLog().error(`Failed to load Copilot data: ${errorMessage}`);
@@ -270,6 +346,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       vscode.window.showErrorMessage(
         vscode.l10n.t("Failed to load Copilot data: {0}", errorMessage)
       );
+      return false;
     } finally {
       this._isLoadingCopilotData = false;
     }
@@ -304,6 +381,12 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   }
 
   private _maybeNotifyPremiumUsage(data: CopilotUserData) {
+    // Respect an active alert snooze.
+    const snoozeUntil = this._context.globalState.get<number>(this._alertSnoozeUntilKey, 0);
+    if (Date.now() < snoozeUntil) {
+      return;
+    }
+
     const premiumQuota = findPremiumQuota(data.quota_snapshots);
     if (!premiumQuota || premiumQuota.unlimited) {
       return;
@@ -351,11 +434,16 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
             quotaLabel,
             highest
           ),
-          vscode.l10n.t("Open details")
+          vscode.l10n.t("Open details"),
+          vscode.l10n.t("Snooze for 24 hours")
         )
         .then((selection) => {
           if (selection === vscode.l10n.t("Open details")) {
             vscode.commands.executeCommand("copilotInsights.sidebarView.focus");
+          } else if (selection === vscode.l10n.t("Snooze for 24 hours")) {
+            const until = Date.now() + 24 * 60 * 60 * 1000;
+            this._context.globalState.update(this._alertSnoozeUntilKey, until);
+            getLog().info("Usage alerts snoozed for 24 hours");
           }
         });
       this._context.globalState.update(this._premiumUsageAlertKey, {
@@ -368,6 +456,92 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         resetDate,
         notified: [],
       });
+    }
+  }
+
+  /**
+   * Shows a one-time information toast when the billing period rolls over
+   * (the reset date changes). On first run the date is stored silently.
+   */
+  private _maybeNotifyQuotaReset(data: CopilotUserData) {
+    const resetDate = data.quota_reset_date_utc || "";
+    if (!resetDate) {
+      return;
+    }
+
+    const lastSeen = this._context.globalState.get<string>(this._lastSeenResetDateKey);
+    if (lastSeen === resetDate) {
+      return;
+    }
+
+    this._context.globalState.update(this._lastSeenResetDateKey, resetDate);
+
+    // First run — just remember the date without notifying.
+    if (lastSeen === undefined) {
+      return;
+    }
+
+    const notifyOnReset = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<boolean>("notifyOnReset", true);
+    if (!notifyOnReset) {
+      return;
+    }
+
+    const premiumQuota = findPremiumQuota(data.quota_snapshots);
+    if (!premiumQuota || premiumQuota.unlimited) {
+      return;
+    }
+
+    const effectiveQuota = getEffectiveQuota(premiumQuota, this._getRenderConfig().customLimit);
+    const credits = effectiveQuota.entitlement || effectiveQuota.quota_remaining;
+    getLog().info(`Quota reset detected (new reset date: ${resetDate})`);
+    vscode.window.showInformationMessage(
+      vscode.l10n.t("Your Copilot quota has reset. You have {0} credits available.", credits)
+    );
+  }
+
+  /**
+   * Writes the snapshot history to the configured auto-export folder at most
+   * once per day. Failures are logged as warnings and never surfaced as toasts.
+   */
+  private async _maybeAutoExportHistory() {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    if (!config.get<boolean>("autoExport.enabled", false)) {
+      return;
+    }
+
+    let folder = config.get<string>("autoExport.folder", "").trim();
+    if (!folder) {
+      return;
+    }
+
+    // Export at most once per day.
+    const today = new Date().toISOString().slice(0, 10);
+    const lastExportDate = this._context.globalState.get<string>(this._lastAutoExportDateKey);
+    if (lastExportDate === today) {
+      return;
+    }
+
+    const format: ExportFormat =
+      config.get<string>("autoExport.format", "json") === "csv" ? "csv" : "json";
+
+    if (folder === "~" || folder.startsWith("~/") || folder.startsWith("~\\")) {
+      folder = path.join(os.homedir(), folder.slice(1));
+    }
+
+    const target = vscode.Uri.file(path.join(folder, `copilot-insights-history.${format}`));
+    const content = serializeHistory(this._snapshots.snapshots, format);
+
+    try {
+      await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+      await this._context.globalState.update(this._lastAutoExportDateKey, today);
+      getLog().info(
+        `Auto-exported ${this._snapshots.snapshots.length} snapshots to ${target.fsPath}`
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      getLog().warn(`Auto-export failed for ${target.fsPath}: ${errorMessage}`);
     }
   }
 }

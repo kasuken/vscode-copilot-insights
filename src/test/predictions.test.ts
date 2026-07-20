@@ -1,5 +1,11 @@
 import * as assert from "assert";
-import { getTrendPrediction, getWeightedPrediction } from "../core/predictions";
+import {
+  computeForecastPoints,
+  estimateOverage,
+  getTrendPrediction,
+  getWeightedPrediction,
+  OVERAGE_COST_PER_CREDIT_USD,
+} from "../core/predictions";
 import { CopilotUserData, LocalSnapshot } from "../types";
 import { makeQuota } from "./quota.test";
 
@@ -110,5 +116,105 @@ suite("getTrendPrediction", () => {
     // usage pairs (newest first): 10, 30, 30 -> recent avg below overall
     const trend = getTrendPrediction(makeHistory([100, 110, 140, 170]));
     assert.strictEqual(trend?.trend, "slowing");
+  });
+});
+
+suite("estimateOverage", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const now = new Date("2026-07-01T00:00:00Z");
+  const resetInTenDays = new Date(now.getTime() + 10 * DAY_MS).toISOString();
+
+  test("returns null for unlimited quotas", () => {
+    const quota = makeQuota({ unlimited: true, overage_permitted: true });
+    assert.strictEqual(estimateOverage(quota, 10, resetInTenDays, now), null);
+  });
+
+  test("returns null when overage is neither permitted nor incurred", () => {
+    const quota = makeQuota({ overage_permitted: false, overage_count: 0, remaining: 120 });
+    assert.strictEqual(estimateOverage(quota, 10, resetInTenDays, now), null);
+  });
+
+  test("reports current overage from the API-reported count", () => {
+    const quota = makeQuota({ overage_permitted: true, overage_count: 25, remaining: 0, quota_remaining: 0 });
+    const estimate = estimateOverage(quota, null, resetInTenDays, now);
+    assert.ok(estimate);
+    assert.strictEqual(estimate.currentOverageCredits, 25);
+    assert.strictEqual(estimate.currentOverageCostUsd, 25 * OVERAGE_COST_PER_CREDIT_USD);
+    assert.strictEqual(estimate.projectedOverageCredits, null);
+    assert.strictEqual(estimate.projectedOverageCostUsd, null);
+  });
+
+  test("falls back to negative remaining for current overage", () => {
+    const quota = makeQuota({ overage_permitted: true, overage_count: 0, remaining: -12, quota_remaining: 0 });
+    const estimate = estimateOverage(quota, null, resetInTenDays, now);
+    assert.ok(estimate);
+    assert.strictEqual(estimate.currentOverageCredits, 12);
+  });
+
+  test("projects future overage from predicted daily usage", () => {
+    // 100 remaining, 20/day for 10 days -> 200 used -> 100 overage projected
+    const quota = makeQuota({ overage_permitted: true, remaining: 100, quota_remaining: 100 });
+    const estimate = estimateOverage(quota, 20, resetInTenDays, now);
+    assert.ok(estimate);
+    assert.strictEqual(estimate.currentOverageCredits, 0);
+    assert.strictEqual(estimate.projectedOverageCredits, 100);
+    assert.strictEqual(estimate.projectedOverageCostUsd, parseFloat((100 * OVERAGE_COST_PER_CREDIT_USD).toFixed(2)));
+    assert.ok(Math.abs(estimate.daysUntilReset - 10) < 0.001);
+  });
+
+  test("adds current overage to the projection when already over", () => {
+    // Already 10 over; 5/day for 10 days all lands in overage -> 60 total
+    const quota = makeQuota({ overage_permitted: true, remaining: -10, quota_remaining: 0 });
+    const estimate = estimateOverage(quota, 5, resetInTenDays, now);
+    assert.ok(estimate);
+    assert.strictEqual(estimate.currentOverageCredits, 10);
+    assert.strictEqual(estimate.projectedOverageCredits, 60);
+  });
+
+  test("projects zero overage when usage stays within the entitlement", () => {
+    const quota = makeQuota({ overage_permitted: true, remaining: 120, quota_remaining: 120 });
+    const estimate = estimateOverage(quota, 5, resetInTenDays, now);
+    assert.ok(estimate);
+    assert.strictEqual(estimate.projectedOverageCredits, 0);
+  });
+
+  test("skips the projection when the reset date is invalid or past", () => {
+    const quota = makeQuota({ overage_permitted: true, overage_count: 5, remaining: 0, quota_remaining: 0 });
+    const past = new Date(now.getTime() - DAY_MS).toISOString();
+    assert.strictEqual(estimateOverage(quota, 10, past, now)?.projectedOverageCredits, null);
+    assert.strictEqual(estimateOverage(quota, 10, "not-a-date", now)?.projectedOverageCredits, null);
+  });
+});
+
+suite("computeForecastPoints", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const start = new Date("2026-07-01T00:00:00Z").getTime();
+
+  test("returns a two-point line when the balance lasts until reset", () => {
+    const reset = start + 10 * DAY_MS;
+    const points = computeForecastPoints(start, 100, 5, reset);
+    assert.deepStrictEqual(points, [
+      { x: start, y: 100 },
+      { x: reset, y: 50 },
+    ]);
+  });
+
+  test("clamps at zero with an intermediate zero-crossing point", () => {
+    const reset = start + 10 * DAY_MS;
+    const points = computeForecastPoints(start, 100, 20, reset);
+    assert.strictEqual(points.length, 3);
+    assert.deepStrictEqual(points[0], { x: start, y: 100 });
+    assert.deepStrictEqual(points[1], { x: start + 5 * DAY_MS, y: 0 });
+    assert.deepStrictEqual(points[2], { x: reset, y: 0 });
+  });
+
+  test("returns empty for non-positive usage or an invalid window", () => {
+    const reset = start + 10 * DAY_MS;
+    assert.deepStrictEqual(computeForecastPoints(start, 100, 0, reset), []);
+    assert.deepStrictEqual(computeForecastPoints(start, 100, -5, reset), []);
+    assert.deepStrictEqual(computeForecastPoints(start, 100, 5, start), []);
+    assert.deepStrictEqual(computeForecastPoints(start, 100, 5, start - DAY_MS), []);
+    assert.deepStrictEqual(computeForecastPoints(NaN, 100, 5, reset), []);
+    assert.deepStrictEqual(computeForecastPoints(start, -1, 5, reset), []);
   });
 });

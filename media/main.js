@@ -32,6 +32,7 @@
     burnRecent: ["--vscode-charts-orange", "#d18616"],
     burnTarget: ["--vscode-charts-green", "#89d185"],
     daily: ["--vscode-charts-blue", "#3794ff"],
+    forecast: ["--vscode-charts-yellow", "#cca700"],
     forecastExpected: ["--vscode-charts-blue", "#3794ff"],
     forecastOptimistic: ["--vscode-charts-green", "#89d185"],
     forecastPessimistic: ["--vscode-charts-red", "#f14c4c"],
@@ -83,7 +84,9 @@
           ? [5, 4]
           : series.role === "today"
             ? [3, 2]
-            : [6, 4]
+            : series.role === "forecast"
+              ? [2, 3]
+              : [6, 4]
         : [];
       const dataset = {
         type: series.type || model.type,

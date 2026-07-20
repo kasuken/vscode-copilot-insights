@@ -2,6 +2,8 @@ import { CopilotUserData } from "../types";
 
 const COPILOT_USER_ENDPOINT = "https://api.github.com/copilot_internal/user";
 
+const FETCH_TIMEOUT_SECONDS = 15;
+
 function normalizeCopilotPlan(plan: unknown): string {
   const value = typeof plan === "string" ? plan.trim() : "";
   if (!value) {
@@ -15,13 +17,29 @@ function normalizeCopilotPlan(plan: unknown): string {
  * authenticated user from GitHub's (internal, undocumented) endpoint.
  */
 export async function fetchCopilotUserData(accessToken: string): Promise<CopilotUserData> {
-  const response = await fetch(COPILOT_USER_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "User-Agent": "VSCode-Copilot-Insights",
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_SECONDS * 1000);
+
+  let response: Response;
+  try {
+    response = await fetch(COPILOT_USER_ENDPOINT, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "User-Agent": "VSCode-Copilot-Insights",
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `GitHub API request timed out after ${FETCH_TIMEOUT_SECONDS} seconds`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (response.status === 401 || response.status === 403) {
     throw new Error(
