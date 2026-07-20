@@ -1,5 +1,14 @@
 # Change Log
 
+# [4.7.0] - 2026-07-20
+
+### Added
+- **`@insights` chat participant**: chat with Copilot Insights directly in Copilot Chat via `@insights`, with `/quota`, `/pacing`, and `/forecast` commands backed by your live quota data and local history.
+- **Organization Copilot metrics (opt-in)**: a new `Copilot Insights: Show Organization Metrics` command surfaces org-level Copilot usage; set the `copilotInsights.organization` setting to enable it.
+- **Reset-day notification**: an optional notification (`copilotInsights.notifyOnReset`) when your billing period rolls over and the AI credit quota resets.
+- **Alert snooze**: usage threshold alerts now offer a "Snooze for 24 hours" action.
+- **Scheduled history auto-export**: the local snapshot history can be exported automatically once per day via the `copilotInsights.autoExport.*` settings (JSON or CSV).
+
 # [4.6.6] - 2026-07-07
 
 ### Changed
