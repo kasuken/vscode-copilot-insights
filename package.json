@@ -220,6 +220,34 @@
           "default": 0,
           "minimum": 0,
           "description": "%copilotInsights.config.dailyBudget.description%"
+        },
+        "copilotInsights.notifyOnReset": {
+          "type": "boolean",
+          "default": true,
+          "description": "%copilotInsights.config.notifyOnReset.description%"
+        },
+        "copilotInsights.autoExport.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "%copilotInsights.config.autoExport.enabled.description%"
+        },
+        "copilotInsights.autoExport.folder": {
+          "type": "string",
+          "default": "",
+          "description": "%copilotInsights.config.autoExport.folder.description%"
+        },
+        "copilotInsights.autoExport.format": {
+          "type": "string",
+          "default": "json",
+          "enum": [
+            "json",
+            "csv"
+          ],
+          "enumDescriptions": [
+            "%copilotInsights.config.autoExport.format.json%",
+            "%copilotInsights.config.autoExport.format.csv%"
+          ],
+          "description": "%copilotInsights.config.autoExport.format.description%"
         }
       }
     },

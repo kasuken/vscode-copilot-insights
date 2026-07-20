@@ -38,5 +38,7 @@
   "Usage Heatmap": "Usage Heatmap",
   "{0} credits used": "{0} credits used",
   "Usage intensity by weekday and time of day, from {0} local refresh intervals": "Usage intensity by weekday and time of day, from {0} local refresh intervals",
-  "Forecast": "Forecast"
+  "Forecast": "Forecast",
+  "Snooze for 24 hours": "Snooze for 24 hours",
+  "Your Copilot quota has reset. You have {0} credits available.": "Your Copilot quota has reset. You have {0} credits available."
 }

@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { StatusBarManager } from "./ui/statusBar";
 import { CopilotInsightsViewProvider } from "./ui/webview/provider";
 import { CopilotQuotaTool } from "./lmTool";
+import { serializeHistory } from "./core/exporter";
 import { getLog } from "./log";
 
 /** Runs one-time settings migrations, guarded by global-state flags. */
@@ -117,6 +118,10 @@ export function activate(context: vscode.ExtensionContext) {
           "customCreditLimit",
           "alertThresholds",
           "dailyBudget",
+          "notifyOnReset",
+          "autoExport.enabled",
+          "autoExport.folder",
+          "autoExport.format",
         ];
         await Promise.all(
           settings.map((setting) =>
@@ -167,12 +172,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const content = format.ext === "json"
-        ? JSON.stringify(history, null, 2)
-        : [
-          "timestamp,premium_remaining,premium_entitlement",
-          ...history.map((s) => `${s.timestamp},${s.premium_remaining},${s.premium_entitlement}`),
-        ].join("\n");
+      const content = serializeHistory(history, format.ext === "json" ? "json" : "csv");
 
       await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf8"));
       getLog().info(`Exported ${history.length} snapshots to ${uri.fsPath}`);

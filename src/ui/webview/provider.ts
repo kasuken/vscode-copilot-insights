@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { CopilotUserData, DEFAULT_POLLING_INTERVAL_SECONDS } from "../../types";
 import { fetchCopilotUserData } from "../../api/copilotApi";
@@ -8,6 +10,7 @@ import {
   normalizePollingIntervalSeconds,
 } from "../../core/quota";
 import { generateMarkdownSummary } from "../../core/markdown";
+import { ExportFormat, serializeHistory } from "../../core/exporter";
 import { SnapshotStore } from "../../core/history";
 import { getLog } from "../../log";
 import { StatusBarManager } from "../statusBar";
@@ -26,6 +29,12 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private _lastStateMessage: WebviewStateMessage = { state: "loading" };
   private readonly _premiumUsageAlertKey =
     "copilotInsights.premiumUsageAlerts";
+  private readonly _lastSeenResetDateKey =
+    "copilotInsights.lastSeenResetDate";
+  private readonly _alertSnoozeUntilKey =
+    "copilotInsights.alertSnoozeUntil";
+  private readonly _lastAutoExportDateKey =
+    "copilotInsights.lastAutoExportDate";
   private readonly _snapshots: SnapshotStore;
   private _pollingTimer?: ReturnType<typeof setInterval>;
   private _isLoadingCopilotData = false;
@@ -319,6 +328,8 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       this._statusBar.update(data, this._snapshots.snapshots);
       this._publishData(data);
       this._maybeNotifyPremiumUsage(data);
+      this._maybeNotifyQuotaReset(data);
+      void this._maybeAutoExportHistory();
       getLog().debug(`Copilot data refreshed for ${data.login || "unknown user"}`);
       return true;
     } catch (error) {
@@ -370,6 +381,12 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   }
 
   private _maybeNotifyPremiumUsage(data: CopilotUserData) {
+    // Respect an active alert snooze.
+    const snoozeUntil = this._context.globalState.get<number>(this._alertSnoozeUntilKey, 0);
+    if (Date.now() < snoozeUntil) {
+      return;
+    }
+
     const premiumQuota = findPremiumQuota(data.quota_snapshots);
     if (!premiumQuota || premiumQuota.unlimited) {
       return;
@@ -417,11 +434,16 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
             quotaLabel,
             highest
           ),
-          vscode.l10n.t("Open details")
+          vscode.l10n.t("Open details"),
+          vscode.l10n.t("Snooze for 24 hours")
         )
         .then((selection) => {
           if (selection === vscode.l10n.t("Open details")) {
             vscode.commands.executeCommand("copilotInsights.sidebarView.focus");
+          } else if (selection === vscode.l10n.t("Snooze for 24 hours")) {
+            const until = Date.now() + 24 * 60 * 60 * 1000;
+            this._context.globalState.update(this._alertSnoozeUntilKey, until);
+            getLog().info("Usage alerts snoozed for 24 hours");
           }
         });
       this._context.globalState.update(this._premiumUsageAlertKey, {
@@ -434,6 +456,92 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         resetDate,
         notified: [],
       });
+    }
+  }
+
+  /**
+   * Shows a one-time information toast when the billing period rolls over
+   * (the reset date changes). On first run the date is stored silently.
+   */
+  private _maybeNotifyQuotaReset(data: CopilotUserData) {
+    const resetDate = data.quota_reset_date_utc || "";
+    if (!resetDate) {
+      return;
+    }
+
+    const lastSeen = this._context.globalState.get<string>(this._lastSeenResetDateKey);
+    if (lastSeen === resetDate) {
+      return;
+    }
+
+    this._context.globalState.update(this._lastSeenResetDateKey, resetDate);
+
+    // First run — just remember the date without notifying.
+    if (lastSeen === undefined) {
+      return;
+    }
+
+    const notifyOnReset = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<boolean>("notifyOnReset", true);
+    if (!notifyOnReset) {
+      return;
+    }
+
+    const premiumQuota = findPremiumQuota(data.quota_snapshots);
+    if (!premiumQuota || premiumQuota.unlimited) {
+      return;
+    }
+
+    const effectiveQuota = getEffectiveQuota(premiumQuota, this._getRenderConfig().customLimit);
+    const credits = effectiveQuota.entitlement || effectiveQuota.quota_remaining;
+    getLog().info(`Quota reset detected (new reset date: ${resetDate})`);
+    vscode.window.showInformationMessage(
+      vscode.l10n.t("Your Copilot quota has reset. You have {0} credits available.", credits)
+    );
+  }
+
+  /**
+   * Writes the snapshot history to the configured auto-export folder at most
+   * once per day. Failures are logged as warnings and never surfaced as toasts.
+   */
+  private async _maybeAutoExportHistory() {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    if (!config.get<boolean>("autoExport.enabled", false)) {
+      return;
+    }
+
+    let folder = config.get<string>("autoExport.folder", "").trim();
+    if (!folder) {
+      return;
+    }
+
+    // Export at most once per day.
+    const today = new Date().toISOString().slice(0, 10);
+    const lastExportDate = this._context.globalState.get<string>(this._lastAutoExportDateKey);
+    if (lastExportDate === today) {
+      return;
+    }
+
+    const format: ExportFormat =
+      config.get<string>("autoExport.format", "json") === "csv" ? "csv" : "json";
+
+    if (folder === "~" || folder.startsWith("~/") || folder.startsWith("~\\")) {
+      folder = path.join(os.homedir(), folder.slice(1));
+    }
+
+    const target = vscode.Uri.file(path.join(folder, `copilot-insights-history.${format}`));
+    const content = serializeHistory(this._snapshots.snapshots, format);
+
+    try {
+      await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+      await this._context.globalState.update(this._lastAutoExportDateKey, today);
+      getLog().info(
+        `Auto-exported ${this._snapshots.snapshots.length} snapshots to ${target.fsPath}`
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      getLog().warn(`Auto-export failed for ${target.fsPath}: ${errorMessage}`);
     }
   }
 }
