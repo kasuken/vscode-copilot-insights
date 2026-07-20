@@ -375,6 +375,6 @@
     "esbuild": "^0.28.1",
     "eslint": "^9.39.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.48.1"
+    "typescript-eslint": "^8.62.1"
   }
 }
