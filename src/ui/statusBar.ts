@@ -143,6 +143,8 @@ export function formatStatusBarText(
 export class StatusBarManager implements vscode.Disposable {
   private readonly _rightItem: vscode.StatusBarItem;
   private readonly _leftItem: vscode.StatusBarItem;
+  private _previewStyle?: string;
+  private _lastData?: CopilotUserData;
 
   constructor() {
     this._rightItem = vscode.window.createStatusBarItem(
@@ -219,7 +221,24 @@ export class StatusBarManager implements vscode.Disposable {
     }
   }
 
+  /**
+   * Temporarily overrides the status bar style used for rendering without
+   * persisting any setting (used by the style picker's live preview).
+   * Pass `undefined` to clear the preview and fall back to the configured
+   * style. Re-renders immediately using the last known data.
+   */
+  previewStyle(style: string | undefined) {
+    if (this._previewStyle === style) {
+      return;
+    }
+    this._previewStyle = style;
+    if (this._lastData) {
+      this.update(this._lastData);
+    }
+  }
+
   update(data: CopilotUserData) {
+    this._lastData = data;
     this.updateVisibility();
 
     const config = vscode.workspace.getConfiguration("copilotInsights");
@@ -238,7 +257,7 @@ export class StatusBarManager implements vscode.Disposable {
         : '';
 
       const textOptions: StatusBarTextOptions = {
-        style: config.get<string>("statusBarStyle", "detailed-original"),
+        style: this._previewStyle ?? config.get<string>("statusBarStyle", "detailed-original"),
         progressBarMode: config.get<string>("progressBarMode", "remaining"),
         showName: config.get<boolean>("statusBar.showName", true),
         showNumericalQuota: config.get<boolean>("statusBar.showNumericalQuota", true),

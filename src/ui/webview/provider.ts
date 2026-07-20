@@ -29,6 +29,11 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private readonly _snapshots: SnapshotStore;
   private _pollingTimer?: ReturnType<typeof setInterval>;
   private _isLoadingCopilotData = false;
+  private _lastSuccessfulFetchMs = 0;
+  private _backoffMultiplier = 1;
+  private static readonly _maxBackoffMultiplier = 8;
+  /** Skip visibility/focus-triggered refreshes when data is fresher than this. */
+  private static readonly _visibilityFreshnessSeconds = 30;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -79,6 +84,21 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     );
     this._context.subscriptions.push(sessionChangeDisposable);
 
+    // Focus-aware polling: pause background polling while the window is
+    // unfocused; resume (with a staleness-guarded silent refresh) on focus.
+    const windowStateDisposable = vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        this._restartPolling();
+        void this.loadCopilotData({
+          silent: true,
+          ifStalerThanSeconds: CopilotInsightsViewProvider._visibilityFreshnessSeconds,
+        });
+      } else {
+        this._clearPollingTimer();
+      }
+    });
+    this._context.subscriptions.push(windowStateDisposable);
+
     this._restartPolling();
   }
 
@@ -120,12 +140,32 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       return;
     }
 
+    // Back off while background refreshes keep failing (1x, 2x, 4x, 8x).
+    const effectiveSeconds = pollingIntervalSeconds * this._backoffMultiplier;
     this._pollingTimer = setInterval(() => {
-      void this.loadCopilotData({ silent: true });
-    }, pollingIntervalSeconds * 1000);
+      void this._pollOnce();
+    }, effectiveSeconds * 1000);
 
     if (refreshImmediately) {
-      void this.loadCopilotData({ silent: true });
+      void this._pollOnce();
+    }
+  }
+
+  /**
+   * Runs one background poll and adjusts the backoff multiplier: doubled
+   * (capped at 8x) after a failure, reset to 1x after a success.
+   */
+  private async _pollOnce() {
+    const succeeded = await this.loadCopilotData({ silent: true });
+    const nextMultiplier = succeeded
+      ? 1
+      : Math.min(
+        this._backoffMultiplier * 2,
+        CopilotInsightsViewProvider._maxBackoffMultiplier
+      );
+    if (nextMultiplier !== this._backoffMultiplier) {
+      this._backoffMultiplier = nextMultiplier;
+      this._restartPolling();
     }
   }
 
@@ -197,10 +237,14 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
     });
 
-    // Refresh Copilot data when view becomes visible
+    // Refresh Copilot data silently when the view becomes visible, unless
+    // the cached data is still fresh.
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
-        this.loadCopilotData();
+        void this.loadCopilotData({
+          silent: true,
+          ifStalerThanSeconds: CopilotInsightsViewProvider._visibilityFreshnessSeconds,
+        });
       }
     });
 
@@ -208,9 +252,28 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this.loadCopilotData();
   }
 
-  public async loadCopilotData(options: { silent?: boolean } = {}) {
+  /**
+   * Loads Copilot data and updates the status bar and webview.
+   *
+   * @param options.silent Never prompt for sign-in or surface errors to the user.
+   * @param options.ifStalerThanSeconds Skip the fetch entirely when the last
+   * successful fetch is more recent than this (used by visibility/focus
+   * handlers; manual refresh always fetches).
+   * @returns `false` when a fetch was attempted and failed, `true` otherwise.
+   */
+  public async loadCopilotData(
+    options: { silent?: boolean; ifStalerThanSeconds?: number } = {}
+  ): Promise<boolean> {
     if (this._isLoadingCopilotData) {
-      return;
+      return true;
+    }
+
+    if (
+      options.ifStalerThanSeconds !== undefined &&
+      this._lastSuccessfulFetchMs > 0 &&
+      Date.now() - this._lastSuccessfulFetchMs < options.ifStalerThanSeconds * 1000
+    ) {
+      return true;
     }
 
     this._isLoadingCopilotData = true;
@@ -238,7 +301,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         } else {
           this._publishError(vscode.l10n.t("Failed to authenticate with GitHub"));
         }
-        return;
+        return true;
       }
 
       const data = await fetchCopilotUserData(session.accessToken);
@@ -252,17 +315,19 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
 
       this._lastData = data;
+      this._lastSuccessfulFetchMs = Date.now();
       this._statusBar.update(data);
       this._publishData(data);
       this._maybeNotifyPremiumUsage(data);
       getLog().debug(`Copilot data refreshed for ${data.login || "unknown user"}`);
+      return true;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
 
       if (options.silent) {
         getLog().warn(`Background refresh failed: ${errorMessage}`);
-        return;
+        return false;
       }
 
       getLog().error(`Failed to load Copilot data: ${errorMessage}`);
@@ -270,6 +335,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       vscode.window.showErrorMessage(
         vscode.l10n.t("Failed to load Copilot data: {0}", errorMessage)
       );
+      return false;
     } finally {
       this._isLoadingCopilotData = false;
     }

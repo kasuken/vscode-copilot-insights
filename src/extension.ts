@@ -118,9 +118,11 @@ export function activate(context: vscode.ExtensionContext) {
           "alertThresholds",
           "dailyBudget",
         ];
-        for (const setting of settings) {
-          await config.update(setting, undefined, vscode.ConfigurationTarget.Global);
-        }
+        await Promise.all(
+          settings.map((setting) =>
+            config.update(setting, undefined, vscode.ConfigurationTarget.Global)
+          )
+        );
 
         vscode.window.showInformationMessage(
           vscode.l10n.t("Copilot Insights settings reset to defaults.")
@@ -226,16 +228,14 @@ export function activate(context: vscode.ExtensionContext) {
       const styleForItem = (item: vscode.QuickPickItem | undefined) =>
         styles.find((s) => s.label === item?.label)?.value;
 
-      let accepted = false;
       quickPick.onDidChangeActive((active) => {
         const style = styleForItem(active[0]);
         if (style) {
-          // Live preview: apply immediately; reverted on cancel
-          void config.update("statusBarStyle", style, vscode.ConfigurationTarget.Global);
+          // Live preview: in-memory only, no settings churn; cleared on hide
+          statusBar.previewStyle(style);
         }
       });
       quickPick.onDidAccept(() => {
-        accepted = true;
         const style = styleForItem(quickPick.selectedItems[0]);
         if (style) {
           void config.update("statusBarStyle", style, vscode.ConfigurationTarget.Global);
@@ -243,9 +243,9 @@ export function activate(context: vscode.ExtensionContext) {
         quickPick.hide();
       });
       quickPick.onDidHide(() => {
-        if (!accepted) {
-          void config.update("statusBarStyle", original, vscode.ConfigurationTarget.Global);
-        }
+        // Clear the in-memory preview: on accept the persisted setting takes
+        // over, on cancel this restores the configured style.
+        statusBar.previewStyle(undefined);
         quickPick.dispose();
       });
       quickPick.show();
