@@ -210,6 +210,55 @@ body {
 	background: linear-gradient(90deg, var(--vscode-charts-blue) 0%, var(--vscode-charts-green) 100%);
 	transition: width 0.3s ease;
 }
+.progress-bar-mini {
+	height: 4px;
+	margin-bottom: 0;
+}
+.breakdown-row {
+	margin-bottom: 10px;
+}
+.breakdown-row:last-child {
+	margin-bottom: 0;
+}
+.breakdown-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 4px;
+}
+.breakdown-name {
+	font-size: 12px;
+	font-weight: 600;
+}
+.breakdown-detail {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+.heatmap-grid {
+	display: grid;
+	grid-template-columns: auto repeat(6, 1fr);
+	gap: 3px;
+	align-items: center;
+}
+.heatmap-day {
+	font-size: 9px;
+	color: var(--vscode-descriptionForeground);
+	padding-right: 4px;
+	text-align: right;
+}
+.heatmap-hour {
+	font-size: 9px;
+	color: var(--vscode-descriptionForeground);
+	text-align: center;
+}
+.heatmap-cell {
+	height: 14px;
+	border-radius: 2px;
+	background-color: var(--vscode-charts-blue);
+}
+.heatmap-cell-empty {
+	background-color: var(--vscode-textCodeBlock-background);
+}
 .quota-status {
 	display: flex;
 	flex-direction: column;
@@ -455,6 +504,10 @@ body {
 	border-top-color: var(--vscode-charts-purple);
 	border-top-style: solid;
 	border-top-width: 2.5px;
+}
+.legend-forecast {
+	border-top-color: var(--vscode-charts-yellow);
+	border-top-style: dotted;
 }
 .legend-forecast-optimistic {
 	border-top-color: var(--vscode-charts-green);

@@ -17,7 +17,14 @@ import {
   getStatusBadge,
 } from "../../core/quota";
 import { getSnapshotComparisons, getUsedToday } from "../../core/history";
-import { getTrendPrediction, getWeightedPrediction } from "../../core/predictions";
+import {
+  computeForecastPoints,
+  estimateOverage,
+  getTrendPrediction,
+  getWeightedPrediction,
+  OVERAGE_COST_PER_CREDIT_USD,
+} from "../../core/predictions";
+import { computeUsageHeatmap, HEATMAP_BLOCK_HOURS } from "../../core/heatmap";
 
 // Localization helper. Dynamic values from core (badge labels, mood texts)
 // are passed through t() at render time; translators provide those strings
@@ -36,7 +43,7 @@ export interface RenderConfig {
 /** A single plotted series or doughnut segment, described as raw data (no colors). */
 export interface ChartSeries {
   /** Semantic role; the webview maps this to theme colors and line styles. */
-  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage" | "forecastOptimistic" | "forecastExpected" | "forecastPessimistic" | "burnOverall" | "burnRecent" | "burnTarget";
+  role: "actual" | "ideal" | "trend" | "today" | "daily" | "used" | "remaining" | "overage" | "forecast" | "forecastOptimistic" | "forecastExpected" | "forecastPessimistic" | "burnOverall" | "burnRecent" | "burnTarget";
   /** Chart.js dataset type for this series. Defaults to the chart model type. */
   type?: "line" | "bar" | "doughnut";
   /** Human-readable label used in tooltips. */
@@ -85,7 +92,10 @@ export interface InsightsViewModel {
   sections: {
     stale: string;
     quotas: string;
+    quotaBreakdown: string;
+    overage: string;
     history: string;
+    heatmap: string;
     weighted: string;
     trend: string;
     summary: string;
@@ -142,7 +152,10 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 	<div id="state-data" class="state hidden">
 		<div id="section-stale"></div>
 		<div id="section-quotas"></div>
+		<div id="section-quotaBreakdown"></div>
+		<div id="section-overage"></div>
 		<div id="section-history"></div>
+		<div id="section-heatmap"></div>
 		<div id="section-weighted"></div>
 		<div id="section-trend"></div>
 		<div id="section-summary"></div>
@@ -202,7 +215,10 @@ export function buildViewModel(
         ? `<div class="warning-banner">⚠️ ${t("Data may be stale (fetched over 1 hour ago)")}</div>`
         : "",
       quotas: renderQuotasSection(data, asOfTime, config),
+      quotaBreakdown: renderQuotaBreakdownSection(data, config),
+      overage: renderOverageSection(data, snapshots, config),
       history: history.html,
+      heatmap: renderHeatmapSection(snapshots),
       weighted: weighted.html,
       trend: trend.html,
       summary: renderSummarySection(data),
@@ -330,13 +346,12 @@ function renderQuotasSection(
 
   let quotasHtml = "";
   if (quotaSnapshotsArray.length > 0) {
-    // Sort so AI Credits appears first
-    const sortedQuotas = [...quotaSnapshotsArray].sort((a, b) => {
-      if (a.quota_id === "premium_interactions") { return -1; }
-      if (b.quota_id === "premium_interactions") { return 1; }
-      return 0;
-    });
-    quotasHtml = sortedQuotas
+    // The hero card focuses on AI Credits; all other quota types are listed
+    // compactly in the "Quota Breakdown" section to avoid duplication.
+    const heroQuotas = quotaSnapshotsArray.filter(
+      (q) => q.quota_id === "premium_interactions"
+    );
+    quotasHtml = heroQuotas
       .map((quota) => {
         const quotaName = escapeHtml(formatQuotaName(quota.quota_id));
 
@@ -636,6 +651,195 @@ function renderQuotasSection(
 			${quotasHtml ||
     `<p style="color: var(--vscode-descriptionForeground);">${t("No quota data available")}</p>`
     }
+		</div>
+	`;
+}
+
+/**
+ * Compact per-type listing of every quota in the snapshot map (Chat,
+ * Suggestions, AI Credits, ...). The AI Credits hero card in the Quotas
+ * section keeps the detailed pacing view; this section gives the overview.
+ */
+function renderQuotaBreakdownSection(
+  data: CopilotUserData,
+  config: RenderConfig
+): string {
+  const quotas = data.quota_snapshots ? Object.values(data.quota_snapshots) : [];
+  if (quotas.length === 0) {
+    return "";
+  }
+
+  const sorted = [...quotas].sort((a, b) => {
+    if (a.quota_id === "premium_interactions") { return -1; }
+    if (b.quota_id === "premium_interactions") { return 1; }
+    return a.quota_id.localeCompare(b.quota_id);
+  });
+
+  const rows = sorted
+    .map((quota) => {
+      const name = escapeHtml(formatQuotaName(quota.quota_id));
+
+      if (quota.unlimited) {
+        return `
+				<div class="breakdown-row">
+					<div class="breakdown-header">
+						<span class="breakdown-name">${name}</span>
+						<span class="quota-badge unlimited" title="${t("You have unlimited usage for this feature")}">${t("Unlimited")}</span>
+					</div>
+				</div>
+			`;
+      }
+
+      const effectiveQ = quota.quota_id === "premium_interactions"
+        ? getEffectiveQuota(quota, config.customLimit)
+        : quota;
+      const { used, isOverQuota, percentUsed, overageAmount } = computeQuotaStats(effectiveQ);
+      const clampedPercentUsed = Math.min(Math.max(percentUsed, 0), 100);
+      const barColor = isOverQuota || percentUsed > 80
+        ? 'var(--vscode-charts-red)'
+        : percentUsed > 50
+          ? 'var(--vscode-charts-yellow)'
+          : 'var(--vscode-charts-green)';
+      const detail = isOverQuota
+        ? t("Over by {0}", overageAmount)
+        : t("{0} used · {1} left of {2}", formatQuotaValue(used), formatQuotaValue(effectiveQ.remaining), formatQuotaValue(effectiveQ.entitlement));
+
+      return `
+			<div class="breakdown-row">
+				<div class="breakdown-header">
+					<span class="breakdown-name" title="${t("Usage for this quota type in the current billing period")}">${name}</span>
+					<span class="breakdown-detail"${isOverQuota ? ' style="color: var(--vscode-charts-red);"' : ''}>${detail}</span>
+				</div>
+				<div class="progress-bar progress-bar-mini">
+					<div class="progress-fill" style="width: ${clampedPercentUsed}%; background: ${barColor};"></div>
+				</div>
+			</div>
+		`;
+    })
+    .join("");
+
+  return `
+		<div class="section">
+			<h2 class="section-title">${t("Quota Breakdown")}</h2>
+			<div class="quota-card">${rows}</div>
+		</div>
+	`;
+}
+
+/**
+ * Projected overage cost for the current billing cycle. Rendered only when
+ * overage is permitted (or already incurred) and there is something to show.
+ */
+function renderOverageSection(
+  data: CopilotUserData,
+  snapshots: readonly LocalSnapshot[],
+  config: RenderConfig
+): string {
+  const premiumQuota = findPremiumQuota(data.quota_snapshots);
+  if (!premiumQuota) {
+    return "";
+  }
+
+  const prediction = getWeightedPrediction(snapshots, data, config.customLimit);
+  const estimate = estimateOverage(
+    premiumQuota,
+    prediction ? prediction.predictedDailyUsage : null,
+    data.quota_reset_date_utc
+  );
+  if (!estimate) {
+    return "";
+  }
+
+  const hasCurrentOverage = estimate.currentOverageCredits > 0;
+  const hasProjectedOverage =
+    estimate.projectedOverageCredits !== null && estimate.projectedOverageCredits > 0;
+  if (!hasCurrentOverage && !hasProjectedOverage) {
+    return "";
+  }
+
+  const currentRow = hasCurrentOverage
+    ? `
+			<div class="prediction-row">
+				<span class="prediction-label" title="${t("Overage credits already consumed this cycle")}">${t("Current overage:")}</span>
+				<span class="prediction-value" style="color: var(--vscode-charts-orange);">${t("{0} credits (~${1})", formatQuotaValue(estimate.currentOverageCredits), estimate.currentOverageCostUsd.toFixed(2))}</span>
+			</div>
+		`
+    : "";
+
+  const projectedRow = hasProjectedOverage
+    ? `
+			<div class="prediction-row">
+				<span class="prediction-label" title="${t("Projected total overage by the reset date at your predicted daily usage")}">${t("Projected by reset:")}</span>
+				<span class="prediction-value" style="color: var(--vscode-charts-red);">${t("{0} credits (~${1})", formatQuotaValue(estimate.projectedOverageCredits ?? 0), (estimate.projectedOverageCostUsd ?? 0).toFixed(2))}</span>
+			</div>
+		`
+    : "";
+
+  return `
+		<div class="section">
+			<h2 class="section-title">${t("Overage Estimate")}</h2>
+			<div class="quota-card">
+				<div class="prediction-container">
+					${currentRow}
+					${projectedRow}
+					<div class="prediction-footer">
+						${t("Estimated at ${0} per credit", OVERAGE_COST_PER_CREDIT_USD.toFixed(2))}
+					</div>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
+/**
+ * Day-of-week × 4-hour-block usage heatmap computed from local snapshot
+ * deltas. Rendered as a plain HTML/CSS grid (no Chart.js) with intensity
+ * expressed via opacity on the theme accent color.
+ */
+function renderHeatmapSection(snapshots: readonly LocalSnapshot[]): string {
+  const heatmap = computeUsageHeatmap(snapshots);
+  if (!heatmap || heatmap.maxValue <= 0) {
+    return "";
+  }
+
+  const locale = vscode.env.language;
+  // 2021-01-03 is a Sunday, matching Date.getDay() index 0.
+  const dayLabel = (day: number) =>
+    new Date(2021, 0, 3 + day).toLocaleDateString(locale, { weekday: "short" });
+
+  const headerCells = Array.from({ length: heatmap.cells[0].length }, (_, block) =>
+    `<div class="heatmap-hour">${block * HEATMAP_BLOCK_HOURS}h</div>`
+  ).join("");
+
+  const rows = heatmap.cells
+    .map((row, day) => {
+      const cells = row
+        .map((value, block) => {
+          const startHour = block * HEATMAP_BLOCK_HOURS;
+          const endHour = startHour + HEATMAP_BLOCK_HOURS;
+          const tooltip = `${dayLabel(day)} ${startHour}:00\u2013${endHour}:00 \u00b7 ${t("{0} credits used", formatQuotaValue(value))}`;
+          if (value <= 0) {
+            return `<div class="heatmap-cell heatmap-cell-empty" title="${tooltip}"></div>`;
+          }
+          const intensity = (0.15 + 0.85 * (value / heatmap.maxValue)).toFixed(2);
+          return `<div class="heatmap-cell" style="opacity: ${intensity};" title="${tooltip}"></div>`;
+        })
+        .join("");
+      return `<div class="heatmap-day">${escapeHtml(dayLabel(day))}</div>${cells}`;
+    })
+    .join("");
+
+  return `
+		<div class="section">
+			<h2 class="section-title">${t("Usage Heatmap")}</h2>
+			<div class="quota-card">
+				<div class="heatmap-grid">
+					<div class="heatmap-day"></div>
+					${headerCells}
+					${rows}
+				</div>
+				<div class="chart-footnote">${t("Usage intensity by weekday and time of day, from {0} local refresh intervals", heatmap.sampleCount)}</div>
+			</div>
 		</div>
 	`;
 }
@@ -1071,7 +1275,7 @@ function renderHistorySection(
   // Prefer the sprint burn-down chart; fall back to the time-based chart when
   // we don't have a valid reset date to anchor the "sprint" window.
   const remainingUsedChart = buildRemainingUsedChartModel(data, config);
-  const chartResult = buildBurndownChartModel(data, snapshots) ?? buildSnapshotChartModel(snapshots);
+  const chartResult = buildBurndownChartModel(data, snapshots, config) ?? buildSnapshotChartModel(snapshots);
   const dailyUsageChart = buildDailyUsageChartModel(data, snapshots, config);
 
   let chartHtml = "";
@@ -1291,7 +1495,11 @@ function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResu
  * reset date and a positive entitlement) is unavailable, so the caller can
  * fall back to the time-based chart.
  */
-function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly LocalSnapshot[]): ChartResult | null {
+function buildBurndownChartModel(
+  data: CopilotUserData,
+  snapshots: readonly LocalSnapshot[],
+  config: RenderConfig
+): ChartResult | null {
   if (snapshots.length < 2) {
     return null;
   }
@@ -1417,6 +1625,33 @@ function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly Loca
     }
   }
 
+  // Forecast line: dotted projection from the latest recorded snapshot to
+  // the reset date, declining at the predicted daily usage (clamped at 0).
+  // Omitted when the local history is too thin to produce a prediction.
+  let forecastLegend = "";
+  const prediction = getWeightedPrediction(snapshots, data, config.customLimit);
+  if (prediction && now < resetTime && realInWindow.length > 0) {
+    const latest = realInWindow[realInWindow.length - 1];
+    const forecastPoints = computeForecastPoints(
+      latest.t,
+      Math.max(0, latest.remaining),
+      prediction.predictedDailyUsage,
+      resetTime
+    );
+    if (forecastPoints.length > 0) {
+      series.push({
+        role: "forecast",
+        label: t("Forecast"),
+        points: forecastPoints.map(p => ({ x: p.x, y: clamp(p.y, 0, entitlement) })),
+        fill: false,
+        dashed: true,
+        showPoints: false,
+        tooltip: true,
+      });
+      forecastLegend = '<span class="legend-item"><span class="legend-swatch legend-forecast"></span>' + t("Forecast") + '</span>';
+    }
+  }
+
   // "Today" marker (only when we're inside the sprint window): a vertical line
   // drawn as a two-point series spanning the full height.
   if (now >= startTime && now <= resetTime) {
@@ -1482,6 +1717,7 @@ function buildBurndownChartModel(data: CopilotUserData, snapshots: readonly Loca
     '<span class="legend-item"><span class="legend-swatch legend-actual"></span>' + t("Actual") + '</span>' +
     '<span class="legend-item"><span class="legend-swatch legend-ideal"></span>' + t("Ideal") + '</span>' +
     trendLegend +
+    forecastLegend +
     '</div>';
   const footnoteHtml = '<div class="chart-footnote" style="color:' + statusColor + ';">' + statusText + trendFootnote + '</div>';
 
