@@ -93,6 +93,10 @@
         "title": "%copilotInsights.command.chooseStatusBarStyle.title%"
       },
       {
+        "command": "vscode-copilot-insights.showOrgMetrics",
+        "title": "%copilotInsights.command.showOrgMetrics.title%"
+      },
+      {
         "command": "vscode-copilot-insights.showLogs",
         "title": "%copilotInsights.command.showLogs.title%"
       }
@@ -248,9 +252,36 @@
             "%copilotInsights.config.autoExport.format.csv%"
           ],
           "description": "%copilotInsights.config.autoExport.format.description%"
+        },
+        "copilotInsights.organization": {
+          "type": "string",
+          "default": "",
+          "description": "%copilotInsights.config.organization.description%"
         }
       }
     },
+    "chatParticipants": [
+      {
+        "id": "copilotInsights.insights",
+        "name": "insights",
+        "fullName": "Copilot Insights",
+        "description": "%copilotInsights.chatParticipant.description%",
+        "commands": [
+          {
+            "name": "quota",
+            "description": "%copilotInsights.chatParticipant.quota.description%"
+          },
+          {
+            "name": "pacing",
+            "description": "%copilotInsights.chatParticipant.pacing.description%"
+          },
+          {
+            "name": "forecast",
+            "description": "%copilotInsights.chatParticipant.forecast.description%"
+          }
+        ]
+      }
+    ],
     "languageModelTools": [
       {
         "name": "insights_getCopilotQuota",

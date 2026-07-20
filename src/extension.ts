@@ -3,6 +3,9 @@ import * as vscode from "vscode";
 import { StatusBarManager } from "./ui/statusBar";
 import { CopilotInsightsViewProvider } from "./ui/webview/provider";
 import { CopilotQuotaTool } from "./lmTool";
+import { registerChatParticipant } from "./chatParticipant";
+import { fetchOrgCopilotMetrics } from "./api/orgMetricsApi";
+import { buildOrgMetricsMarkdown } from "./core/orgMetrics";
 import { serializeHistory } from "./core/exporter";
 import { getLog } from "./log";
 
@@ -68,6 +71,9 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.lm.registerTool("insights_getCopilotQuota", new CopilotQuotaTool(provider))
   );
+
+  // Chat participant so users can ask @insights about quota, pacing, forecast
+  registerChatParticipant(context, provider);
 
   // Trigger initial data load to populate status bars.
   // Silent: never prompt for GitHub sign-in at startup — interactive auth
@@ -252,6 +258,52 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Opt-in: fetch and show org-level Copilot metrics (official REST API).
+  // Only ever called from this command — never automatically.
+  const showOrgMetricsCommand = vscode.commands.registerCommand(
+    "vscode-copilot-insights.showOrgMetrics",
+    async () => {
+      const config = vscode.workspace.getConfiguration("copilotInsights");
+      let org = config.get<string>("organization", "").trim();
+
+      if (!org) {
+        const input = await vscode.window.showInputBox({
+          title: vscode.l10n.t("Copilot Insights: Organization Metrics"),
+          prompt: vscode.l10n.t("Enter the GitHub organization slug to fetch Copilot metrics for"),
+          placeHolder: vscode.l10n.t("e.g. my-org"),
+          ignoreFocusOut: true,
+        });
+        if (!input || !input.trim()) {
+          return;
+        }
+        org = input.trim();
+        await config.update("organization", org, vscode.ConfigurationTarget.Global);
+      }
+
+      try {
+        const session = await vscode.authentication.getSession(
+          "github",
+          ["read:org"],
+          { createIfNone: true }
+        );
+        const metrics = await fetchOrgCopilotMetrics(org, session.accessToken);
+        const content = buildOrgMetricsMarkdown(org, metrics);
+        const document = await vscode.workspace.openTextDocument({
+          language: "markdown",
+          content,
+        });
+        await vscode.window.showTextDocument(document, { preview: false });
+        getLog().info(`Fetched org Copilot metrics for '${org}' (${metrics.length} days)`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        getLog().error(`Failed to fetch org Copilot metrics for '${org}': ${message}`);
+        vscode.window.showErrorMessage(
+          vscode.l10n.t("Failed to fetch Copilot metrics for '{0}': {1}", org, message)
+        );
+      }
+    }
+  );
+
   // Show the extension's log output channel
   const showLogsCommand = vscode.commands.registerCommand(
     "vscode-copilot-insights.showLogs",
@@ -267,6 +319,7 @@ export function activate(context: vscode.ExtensionContext) {
     exportHistoryCommand,
     clearHistoryCommand,
     chooseStyleCommand,
+    showOrgMetricsCommand,
     showLogsCommand
   );
 }
