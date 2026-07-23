@@ -168,7 +168,6 @@
 ### Fixed
 - **No Overlapping Fetches**: Prevented concurrent refresh requests during background polling.
 - **Reset to Defaults Coverage**: "Reset to Defaults" now restores `copilotInsights.pollingIntervalSeconds` to its default value.
->>>>>>> 4a78246992891eec50a9dbfda381c935340d5ae0
 
 # [3.8.5] - 2026-03-31
 
