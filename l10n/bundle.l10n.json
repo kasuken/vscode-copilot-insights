@@ -69,5 +69,19 @@
   "**Days until exhaustion:** ~{0} — after the reset on {1}, so you should be fine": "**Days until exhaustion:** ~{0} — after the reset on {1}, so you should be fine",
   "**Current overage:** {0} credits (~${1})": "**Current overage:** {0} credits (~${1})",
   "**Projected overage by reset:** {0} credits (~${1})": "**Projected overage by reset:** {0} credits (~${1})",
-  "No overage is projected for this billing period.": "No overage is projected for this billing period."
+  "No overage is projected for this billing period.": "No overage is projected for this billing period.",
+  "AI Credit Budget Planner": "AI Credit Budget Planner",
+  "Your AI credit quota is unlimited, so no daily budget is needed.": "Your AI credit quota is unlimited, so no daily budget is needed.",
+  "On budget — reserve preserved": "On budget — reserve preserved",
+  "Over budget — reduce planned requests": "Over budget — reduce planned requests",
+  "Reset date unavailable": "Reset date unavailable",
+  "Sustainable until reset": "Sustainable until reset",
+  "requests/day": "requests/day",
+  "Model premium requests locally using the AI-credit cost per request.": "Model premium requests locally using the AI-credit cost per request.",
+  "Planned requests/day": "Planned requests/day",
+  "Credit multiplier": "Credit multiplier",
+  "Reserve target": "Reserve target",
+  "Planned spend/day": "Planned spend/day",
+  "Projected at reset": "Projected at reset",
+  "Days to reset": "Days to reset"
 }

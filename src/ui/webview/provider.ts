@@ -62,6 +62,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         event.affectsConfiguration('copilotInsights.statusBar.enableColoredBackground') ||
         event.affectsConfiguration('copilotInsights.showMood') ||
         event.affectsConfiguration('copilotInsights.dailyBudget') ||
+        event.affectsConfiguration('copilotInsights.reserveCredits') ||
         event.affectsConfiguration('copilotInsights.customCreditLimit');
       const affectedPolling = event.affectsConfiguration(
         "copilotInsights.pollingIntervalSeconds"
@@ -360,6 +361,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       customLimit: config.get<number>("customCreditLimit", 0),
       enableColoring: config.get<boolean>("statusBar.enableColoredBackground", true),
       dailyBudget: config.get<number>("dailyBudget", 0),
+      reserveCredits: config.get<number>("reserveCredits", 0),
     };
   }
 

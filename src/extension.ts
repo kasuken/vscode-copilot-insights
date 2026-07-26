@@ -124,6 +124,7 @@ export function activate(context: vscode.ExtensionContext) {
           "customCreditLimit",
           "alertThresholds",
           "dailyBudget",
+          "reserveCredits",
           "notifyOnReset",
           "autoExport.enabled",
           "autoExport.folder",
