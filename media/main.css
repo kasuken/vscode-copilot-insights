@@ -288,6 +288,81 @@ body {
 	padding: 4px 0;
 	font-style: italic;
 }
+.planner-card {
+	padding: 12px;
+}
+.planner-lead {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin-bottom: 6px;
+	color: var(--vscode-descriptionForeground);
+}
+.planner-lead strong {
+	font-size: 24px;
+	color: var(--vscode-charts-green);
+}
+.planner-controls {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+	margin: 10px 0;
+}
+.planner-controls label {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
+.planner-controls input {
+	min-width: 0;
+	box-sizing: border-box;
+	padding: 5px 6px;
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 2px;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	font: inherit;
+}
+.planner-controls input:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+.planner-results {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px;
+}
+.planner-results div {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 6px;
+	border-radius: 3px;
+	background: var(--vscode-textCodeBlock-background);
+}
+.planner-results span {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
+.planner-status {
+	margin-top: 8px;
+	font-size: 11px;
+	font-weight: 600;
+}
+.planner-status.is-ok {
+	color: var(--vscode-charts-green);
+}
+.planner-status.is-over {
+	color: var(--vscode-charts-red);
+}
+@media (max-width: 460px) {
+	.planner-controls,
+	.planner-results {
+		grid-template-columns: 1fr;
+	}
+}
 .quota-pacing-highlight {
 	background-color: var(--vscode-textCodeBlock-background);
 	border-radius: 4px;

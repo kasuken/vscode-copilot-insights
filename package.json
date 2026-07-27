@@ -225,6 +225,12 @@
           "minimum": 0,
           "description": "%copilotInsights.config.dailyBudget.description%"
         },
+        "copilotInsights.reserveCredits": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "%copilotInsights.config.reserveCredits.description%"
+        },
         "copilotInsights.notifyOnReset": {
           "type": "boolean",
           "default": true,

@@ -25,6 +25,7 @@ import {
   OVERAGE_COST_PER_CREDIT_USD,
 } from "../../core/predictions";
 import { computeUsageHeatmap, HEATMAP_BLOCK_HOURS } from "../../core/heatmap";
+import { calculateCreditBudgetPlan } from "../../core/planner";
 
 // Localization helper. Dynamic values from core (badge labels, mood texts)
 // are passed through t() at render time; translators provide those strings
@@ -38,6 +39,7 @@ export interface RenderConfig {
   customLimit: number;
   enableColoring: boolean;
   dailyBudget: number;
+  reserveCredits: number;
 }
 
 /** A single plotted series or doughnut segment, described as raw data (no colors). */
@@ -94,6 +96,7 @@ export interface InsightsViewModel {
     quotas: string;
     quotaBreakdown: string;
     overage: string;
+    planner: string;
     history: string;
     heatmap: string;
     weighted: string;
@@ -154,6 +157,7 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 		<div id="section-quotas"></div>
 		<div id="section-quotaBreakdown"></div>
 		<div id="section-overage"></div>
+		<div id="section-planner"></div>
 		<div id="section-history"></div>
 		<div id="section-heatmap"></div>
 		<div id="section-weighted"></div>
@@ -217,6 +221,7 @@ export function buildViewModel(
       quotas: renderQuotasSection(data, asOfTime, config),
       quotaBreakdown: renderQuotaBreakdownSection(data, config),
       overage: renderOverageSection(data, snapshots, config),
+      planner: renderPlannerSection(data, config),
       history: history.html,
       heatmap: renderHeatmapSection(snapshots),
       weighted: weighted.html,
@@ -228,6 +233,92 @@ export function buildViewModel(
     charts: [...history.charts, ...weighted.charts, ...trend.charts],
     lastFetched: t("Last fetched: {0}", timeSince),
   };
+}
+
+function renderPlannerSection(data: CopilotUserData, config: RenderConfig): string {
+  const quota = findPremiumQuota(data.quota_snapshots);
+  if (!quota) {
+    return "";
+  }
+
+  if (quota.unlimited) {
+    return `
+      <div class="section">
+        <h2 class="section-title">${t("AI Credit Budget Planner")}</h2>
+        <div class="quota-card planner-card">
+          <div class="quota-description">${t("Your AI credit quota is unlimited, so no daily budget is needed.")}</div>
+        </div>
+      </div>`;
+  }
+
+  const effectiveQuota = getEffectiveQuota(quota, config.customLimit);
+  const remaining = Math.max(0, effectiveQuota.remaining);
+  const reserve = Number.isFinite(config.reserveCredits)
+    ? Math.max(0, config.reserveCredits)
+    : 0;
+  const baseline = calculateCreditBudgetPlan({
+    remainingCredits: remaining,
+    resetDate: data.quota_reset_date_utc,
+    plannedRequestsPerDay: 0,
+    creditMultiplier: 1,
+    reserveCredits: reserve,
+  });
+  const planned = Math.floor(baseline.sustainableRequestsPerDay * 10) / 10;
+  const initial = calculateCreditBudgetPlan({
+    remainingCredits: remaining,
+    resetDate: data.quota_reset_date_utc,
+    plannedRequestsPerDay: planned,
+    creditMultiplier: 1,
+    reserveCredits: reserve,
+  });
+  const format = (value: number) =>
+    Number.isFinite(value) ? value.toLocaleString(vscode.env.language, { maximumFractionDigits: 1 }) : "0";
+  const resetMs = new Date(data.quota_reset_date_utc).getTime();
+  const safeResetMs = Number.isFinite(resetMs) ? resetMs : 0;
+  const status = initial.hasValidReset
+    ? initial.meetsReserve
+      ? t("On budget — reserve preserved")
+      : t("Over budget — reduce planned requests")
+    : t("Reset date unavailable");
+
+  return `
+    <div class="section">
+      <h2 class="section-title">${t("AI Credit Budget Planner")}</h2>
+      <div id="credit-budget-planner" class="quota-card planner-card"
+        data-remaining="${remaining}"
+        data-reset-ms="${safeResetMs}"
+        data-default-reserve="${reserve}"
+        data-status-ok="${escapeHtml(t("On budget — reserve preserved"))}"
+        data-status-over="${escapeHtml(t("Over budget — reduce planned requests"))}"
+        data-status-reset="${escapeHtml(t("Reset date unavailable"))}">
+        <div class="planner-lead">
+          <span>${t("Sustainable until reset")}</span>
+          <strong id="planner-sustainable">${format(baseline.sustainableRequestsPerDay)}</strong>
+          <span>${t("requests/day")}</span>
+        </div>
+        <div class="quota-description">${t("Model premium requests locally using the AI-credit cost per request.")}</div>
+        <div class="planner-controls">
+          <label>
+            <span>${t("Planned requests/day")}</span>
+            <input id="planner-requests" type="number" min="0" step="0.1" value="${planned}">
+          </label>
+          <label>
+            <span>${t("Credit multiplier")}</span>
+            <input id="planner-multiplier" type="number" min="0.1" step="0.1" value="1">
+          </label>
+          <label>
+            <span>${t("Reserve target")}</span>
+            <input id="planner-reserve" type="number" min="0" step="0.1" value="${reserve}">
+          </label>
+        </div>
+        <div class="planner-results">
+          <div><span>${t("Planned spend/day")}</span><strong id="planner-spend">${format(initial.plannedCreditsPerDay)}</strong></div>
+          <div><span>${t("Projected at reset")}</span><strong id="planner-projected">${format(initial.projectedCreditsAtReset)}</strong></div>
+          <div><span>${t("Days to reset")}</span><strong id="planner-days">${format(initial.daysUntilReset)}</strong></div>
+        </div>
+        <div id="planner-status" class="planner-status ${initial.meetsReserve ? "is-ok" : "is-over"}">${status}</div>
+      </div>
+    </div>`;
 }
 
 function renderSummarySection(data: CopilotUserData): string {

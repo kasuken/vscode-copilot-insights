@@ -25,6 +25,7 @@ It focuses on operational visibility, not team analytics. The extension helps an
 - Sidebar view with plan details, quota cards, pacing guidance, overage messaging, and organization access.
 - Sprint burn-down chart that plots your actual AI credit usage against an ideal pace line for the current billing period, using locally stored snapshots.
 - Weighted prediction and burn-rate analysis for AI credits.
+- Interactive AI Credit Budget Planner for sustainable daily requests, model cost multipliers, and an optional reserve.
 - Status bar indicator with configurable placement, style, and content.
 - One-click export to clipboard as Markdown or raw JSON.
 - Configurable background polling, plus auto-refresh when the Insights view becomes visible.
@@ -56,6 +57,7 @@ The Copilot Insights activity bar view shows:
 - Overage state, over-quota summary, and estimated overage cost when applicable.
 - Local snapshot history with trend chart and delta comparisons.
 - Weighted prediction and burn-rate analysis for AI credits.
+- Reset-aware planning for premium requests per day at a chosen AI-credit multiplier and reserve target.
 - Troubleshooting context when the endpoint fails or returns stale data.
 
 ### Status bar
@@ -136,6 +138,7 @@ Key settings:
 - `copilotInsights.customCreditLimit`: Budget against a custom AI credit limit above your plan entitlement.
 - `copilotInsights.alertThresholds`: Usage percentages that trigger a warning notification (default `[85]`), each once per billing period.
 - `copilotInsights.dailyBudget`: Optional daily AI credit budget shown against today's usage.
+- `copilotInsights.reserveCredits`: AI credits to keep in reserve in the budget planner (default `0`).
 - `copilotInsights.notifyOnReset`: Show a notification when your billing period rolls over and the quota resets.
 - `copilotInsights.autoExport.enabled` / `copilotInsights.autoExport.folder` / `copilotInsights.autoExport.format`: Automatically export the local snapshot history to a file (JSON or CSV) once per day.
 - `copilotInsights.organization`: GitHub organization slug for the opt-in organization Copilot metrics command.
