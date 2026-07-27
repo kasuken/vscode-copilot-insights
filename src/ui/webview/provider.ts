@@ -37,12 +37,17 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     "copilotInsights.lastAutoExportDate";
   private readonly _snapshots: SnapshotStore;
   private _pollingTimer?: ReturnType<typeof setInterval>;
-  private _isLoadingCopilotData = false;
+  private _inflightLoad?: { promise: Promise<boolean>; silent: boolean };
+  private _startupRetryTimer?: ReturnType<typeof setTimeout>;
+  private _startupRetryAttempt = 0;
   private _lastSuccessfulFetchMs = 0;
   private _backoffMultiplier = 1;
   private static readonly _maxBackoffMultiplier = 8;
   /** Skip visibility/focus-triggered refreshes when data is fresher than this. */
   private static readonly _visibilityFreshnessSeconds = 30;
+  /** Silent retry delays while the first load keeps failing right after
+   * startup (GitHub auth provider or network may not be ready yet). */
+  private static readonly _startupRetryDelaysSeconds = [5, 15, 45];
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -114,6 +119,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
   public dispose() {
     this._clearPollingTimer();
+    this._cancelStartupRetry();
   }
 
   /** Local snapshot history for the active account (newest first). */
@@ -258,14 +264,18 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
     });
 
-    // Load initial data
-    this.loadCopilotData();
+    // Initial load is silent so a restored view never pops an auth prompt
+    // at startup — the sign-in button and refresh command are the
+    // interactive paths.
+    void this.loadCopilotData({ silent: true });
   }
 
   /**
    * Loads Copilot data and updates the status bar and webview.
    *
-   * @param options.silent Never prompt for sign-in or surface errors to the user.
+   * @param options.silent Never prompt for sign-in and never toast errors.
+   * Failures may still surface inline (status bar/webview) once startup
+   * retries are exhausted with no data to show.
    * @param options.ifStalerThanSeconds Skip the fetch entirely when the last
    * successful fetch is more recent than this (used by visibility/focus
    * handlers; manual refresh always fetches).
@@ -274,8 +284,21 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   public async loadCopilotData(
     options: { silent?: boolean; ifStalerThanSeconds?: number } = {}
   ): Promise<boolean> {
-    if (this._isLoadingCopilotData) {
-      return true;
+    const inflight = this._inflightLoad;
+    if (inflight) {
+      // Never drop an interactive request (view opened, manual refresh) in
+      // favor of an in-flight silent load: the silent load may finish with
+      // no session or an unsurfaced error. Wait for it, then run
+      // interactively unless it already produced fresh data.
+      if (!options.silent && inflight.silent) {
+        const fetchedBefore = this._lastSuccessfulFetchMs;
+        await inflight.promise;
+        if (this._lastSuccessfulFetchMs > fetchedBefore) {
+          return true;
+        }
+        return this.loadCopilotData(options);
+      }
+      return inflight.promise;
     }
 
     if (
@@ -286,8 +309,17 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       return true;
     }
 
-    this._isLoadingCopilotData = true;
+    const silent = options.silent === true;
+    const promise = this._doLoadCopilotData(silent).finally(() => {
+      if (this._inflightLoad?.promise === promise) {
+        this._inflightLoad = undefined;
+      }
+    });
+    this._inflightLoad = { promise, silent };
+    return promise;
+  }
 
+  private async _doLoadCopilotData(silent: boolean): Promise<boolean> {
     try {
       // Get GitHub authentication session.
       // Silent loads (startup, background polling) never prompt the user;
@@ -295,18 +327,21 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       const session = await vscode.authentication.getSession(
         "github",
         ["user:email"],
-        options.silent
+        silent
           ? { createIfNone: false, silent: true }
           : { createIfNone: true }
       );
 
       if (!session) {
-        if (options.silent) {
+        if (silent) {
           // No session available without prompting — show a sign-in hint
           // instead of an error (unless we already have data to display).
           if (!this._lastData) {
             this._statusBar.showSignIn();
             this._postState({ state: "signin" });
+            // Right after startup the auth provider may not have restored
+            // sessions yet — retry silently a few times.
+            this._scheduleStartupRetry();
           }
         } else {
           this._publishError(vscode.l10n.t("Failed to authenticate with GitHub"));
@@ -326,6 +361,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       this._lastData = data;
       this._lastSuccessfulFetchMs = Date.now();
+      this._cancelStartupRetry();
       this._statusBar.update(data, this._snapshots.snapshots);
       this._publishData(data);
       this._maybeNotifyPremiumUsage(data);
@@ -337,8 +373,16 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
 
-      if (options.silent) {
+      if (silent) {
         getLog().warn(`Background refresh failed: ${errorMessage}`);
+        if (!this._lastData) {
+          this._scheduleStartupRetry();
+          // Retries exhausted and still nothing to show — replace the
+          // endless spinner with an inline error (no toast).
+          if (!this._startupRetryTimer) {
+            this._publishError(errorMessage);
+          }
+        }
         return false;
       }
 
@@ -348,8 +392,34 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         vscode.l10n.t("Failed to load Copilot data: {0}", errorMessage)
       );
       return false;
-    } finally {
-      this._isLoadingCopilotData = false;
+    }
+  }
+
+  /**
+   * Schedules a bounded silent reload after a failed or session-less load
+   * while no data has ever been fetched. Covers the launch window where the
+   * GitHub auth provider hasn't registered/restored sessions yet or the
+   * network isn't up, without waiting a full polling interval.
+   */
+  private _scheduleStartupRetry() {
+    const delays = CopilotInsightsViewProvider._startupRetryDelaysSeconds;
+    if (this._startupRetryTimer || this._startupRetryAttempt >= delays.length) {
+      return;
+    }
+    const delaySeconds = delays[this._startupRetryAttempt++];
+    getLog().debug(`Scheduling startup data retry in ${delaySeconds}s`);
+    this._startupRetryTimer = setTimeout(() => {
+      this._startupRetryTimer = undefined;
+      if (!this._lastData) {
+        void this.loadCopilotData({ silent: true });
+      }
+    }, delaySeconds * 1000);
+  }
+
+  private _cancelStartupRetry() {
+    if (this._startupRetryTimer) {
+      clearTimeout(this._startupRetryTimer);
+      this._startupRetryTimer = undefined;
     }
   }
 

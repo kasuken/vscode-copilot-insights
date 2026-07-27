@@ -1,5 +1,15 @@
 # Change Log
 
+# [5.0.1] - 2026-07-27
+
+### Fixed
+- **Sidebar stuck on "Loading Copilot data..."**: a scoping bug in the webview script threw an error while rendering fetched data, leaving the sidebar on the loading state even though the status bar had updated successfully.
+- **Data not loading reliably on startup**: concurrent load requests (startup, restored view, polling) could drop each other; the initial load now coalesces properly and retries silently a few times if the GitHub session or network isn't ready yet, surfacing an inline error instead of spinning forever if all retries fail.
+- **Startup no longer prompts for GitHub sign-in**: the sidebar's initial data load is now silent, so a restored view never pops an authentication prompt at launch.
+
+### Changed
+- **Reordered sidebar sections**: the AI Credit Budget Planner now appears directly above Plan Details.
+
 # [5.0.0] - 2026-07-27
 
 ### Added

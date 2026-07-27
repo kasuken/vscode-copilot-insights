@@ -157,11 +157,11 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 		<div id="section-quotas"></div>
 		<div id="section-quotaBreakdown"></div>
 		<div id="section-overage"></div>
-		<div id="section-planner"></div>
 		<div id="section-history"></div>
 		<div id="section-heatmap"></div>
 		<div id="section-weighted"></div>
 		<div id="section-trend"></div>
+		<div id="section-planner"></div>
 		<div id="section-summary"></div>
 		<div id="section-orgs"></div>
 		<div id="section-access"></div>
@@ -221,11 +221,11 @@ export function buildViewModel(
       quotas: renderQuotasSection(data, asOfTime, config),
       quotaBreakdown: renderQuotaBreakdownSection(data, config),
       overage: renderOverageSection(data, snapshots, config),
-      planner: renderPlannerSection(data, config),
       history: history.html,
       heatmap: renderHeatmapSection(snapshots),
       weighted: weighted.html,
       trend: trend.html,
+      planner: renderPlannerSection(data, config),
       summary: renderSummarySection(data),
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
