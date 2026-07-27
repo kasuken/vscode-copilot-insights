@@ -1,6 +1,6 @@
 # Change Log
 
-# [4.8.0] - 2026-07-27
+# [5.0.0] - 2026-07-27
 
 ### Added
 - **Interactive AI Credit Budget Planner**: model sustainable premium requests per day through the billing reset, adjust the AI-credit multiplier, and see whether a planned daily spend preserves a reserve target.
