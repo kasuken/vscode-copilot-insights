@@ -6,6 +6,7 @@ import { CopilotQuotaTool } from "./lmTool";
 import { registerChatParticipant } from "./chatParticipant";
 import { fetchOrgCopilotMetrics } from "./api/orgMetricsApi";
 import { buildOrgMetricsMarkdown } from "./core/orgMetrics";
+import { getGitHubHostConfig } from "./core/githubHost";
 import { serializeHistory } from "./core/exporter";
 import { getLog } from "./log";
 
@@ -282,12 +283,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       try {
+        const hostConfig = getGitHubHostConfig();
         const session = await vscode.authentication.getSession(
-          "github",
+          hostConfig.authProviderId,
           ["read:org"],
           { createIfNone: true }
         );
-        const metrics = await fetchOrgCopilotMetrics(org, session.accessToken);
+        const metrics = await fetchOrgCopilotMetrics(org, session.accessToken, hostConfig.apiBaseUrl);
         const content = buildOrgMetricsMarkdown(org, metrics);
         const document = await vscode.workspace.openTextDocument({
           language: "markdown",

@@ -24,7 +24,8 @@ export interface OrgCopilotMetricsDay {
  */
 export async function fetchOrgCopilotMetrics(
   org: string,
-  accessToken: string
+  accessToken: string,
+  apiBaseUrl = "https://api.github.com"
 ): Promise<OrgCopilotMetricsDay[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_SECONDS * 1000);
@@ -32,7 +33,7 @@ export async function fetchOrgCopilotMetrics(
   let response: Response;
   try {
     response = await fetch(
-      `https://api.github.com/orgs/${encodeURIComponent(org)}/copilot/metrics`,
+      `${apiBaseUrl}/orgs/${encodeURIComponent(org)}/copilot/metrics`,
       {
         headers: {
           Authorization: "Bearer " + accessToken,

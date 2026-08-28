@@ -12,6 +12,7 @@ import {
 import { generateMarkdownSummary } from "../../core/markdown";
 import { ExportFormat, serializeHistory } from "../../core/exporter";
 import { SnapshotStore } from "../../core/history";
+import { getGitHubHostConfig } from "../../core/githubHost";
 import { getLog } from "../../log";
 import { StatusBarManager } from "../statusBar";
 import {
@@ -86,13 +87,18 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       if (affectedPolling) {
         this._restartPolling(true);
       }
+
+      if (event.affectsConfiguration("github-enterprise.uri")) {
+        this._lastData = undefined;
+        void this.loadCopilotData({ silent: true });
+      }
     });
     this._context.subscriptions.push(configurationChangeDisposable);
 
     // Refresh silently when GitHub authentication sessions change (sign-in/out)
     const sessionChangeDisposable = vscode.authentication.onDidChangeSessions(
       (event) => {
-        if (event.provider.id === "github") {
+        if (event.provider.id === "github" || event.provider.id === "github-enterprise") {
           void this.loadCopilotData({ silent: true });
         }
       }
@@ -321,11 +327,13 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
   private async _doLoadCopilotData(silent: boolean): Promise<boolean> {
     try {
+      const hostConfig = getGitHubHostConfig();
+
       // Get GitHub authentication session.
       // Silent loads (startup, background polling) never prompt the user;
       // interactive loads (opening the view, manual refresh) may show the sign-in flow.
       const session = await vscode.authentication.getSession(
-        "github",
+        hostConfig.authProviderId,
         ["user:email"],
         silent
           ? { createIfNone: false, silent: true }
@@ -349,7 +357,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         return true;
       }
 
-      const data = await fetchCopilotUserData(session.accessToken);
+      const data = await fetchCopilotUserData(session.accessToken, hostConfig.apiBaseUrl);
 
       // Record snapshot for history tracking (per GitHub account)
       this._snapshots.setAccount(data.login);
