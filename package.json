@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "5.0.1",
+  "version": "5.2.0",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -225,12 +225,6 @@
           "minimum": 0,
           "description": "%copilotInsights.config.dailyBudget.description%"
         },
-        "copilotInsights.reserveCredits": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "%copilotInsights.config.reserveCredits.description%"
-        },
         "copilotInsights.notifyOnReset": {
           "type": "boolean",
           "default": true,
@@ -259,6 +253,21 @@
           ],
           "description": "%copilotInsights.config.autoExport.format.description%"
         },
+        "copilotInsights.attribution.mode": {
+          "type": "string",
+          "default": "project-and-branch",
+          "enum": [
+            "project-and-branch",
+            "project",
+            "off"
+          ],
+          "enumDescriptions": [
+            "%copilotInsights.config.attribution.mode.projectAndBranch%",
+            "%copilotInsights.config.attribution.mode.project%",
+            "%copilotInsights.config.attribution.mode.off%"
+          ],
+          "description": "%copilotInsights.config.attribution.mode.description%"
+        },
         "copilotInsights.organization": {
           "type": "string",
           "default": "",
@@ -284,6 +293,10 @@
           {
             "name": "forecast",
             "description": "%copilotInsights.chatParticipant.forecast.description%"
+          },
+          {
+            "name": "projects",
+            "description": "%copilotInsights.chatParticipant.projects.description%"
           }
         ]
       }

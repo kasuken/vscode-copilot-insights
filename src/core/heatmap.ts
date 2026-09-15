@@ -1,4 +1,4 @@
-import { LocalSnapshot } from "../types";
+import { DailyRollup, LocalSnapshot } from "../types";
 
 /** Number of hour blocks per day in the heatmap (4-hour blocks). */
 export const HEATMAP_HOUR_BLOCKS = 6;
@@ -58,6 +58,51 @@ export function computeUsageHeatmap(
     );
     cells[day][block] += usage;
     sampleCount++;
+  }
+
+  if (sampleCount < minSamples) {
+    return null;
+  }
+
+  const maxValue = Math.max(...cells.map((row) => Math.max(...row)));
+
+  return { cells, maxValue, sampleCount };
+}
+
+/**
+ * Builds the heatmap from daily rollups (ascending by date), which cover the
+ * whole billing period rather than just the retained raw-snapshot window.
+ * Each rollup already carries its usage split across the day's hour blocks,
+ * so this only has to map the calendar date onto a day of the week.
+ *
+ * `sampleCount` counts populated buckets rather than raw intervals; returns
+ * null when fewer than `minSamples` buckets have usage.
+ */
+export function computeUsageHeatmapFromRollups(
+  rollups: readonly DailyRollup[],
+  minSamples = HEATMAP_MIN_SAMPLES
+): UsageHeatmap | null {
+  const cells: number[][] = Array.from({ length: 7 }, () =>
+    new Array<number>(HEATMAP_HOUR_BLOCKS).fill(0)
+  );
+
+  let sampleCount = 0;
+  for (const rollup of rollups) {
+    // `YYYY-MM-DD` with an explicit midnight parses in local time, so the
+    // weekday matches the local day the usage was recorded on.
+    const when = new Date(`${rollup.date}T00:00:00`);
+    if (isNaN(when.getTime())) {
+      continue;
+    }
+
+    const day = when.getDay();
+    for (let block = 0; block < HEATMAP_HOUR_BLOCKS; block++) {
+      const value = rollup.blocks[block] ?? 0;
+      if (value > 0) {
+        cells[day][block] += value;
+        sampleCount++;
+      }
+    }
   }
 
   if (sampleCount < minSamples) {

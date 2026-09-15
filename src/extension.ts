@@ -6,7 +6,13 @@ import { CopilotQuotaTool } from "./lmTool";
 import { registerChatParticipant } from "./chatParticipant";
 import { fetchOrgCopilotMetrics } from "./api/orgMetricsApi";
 import { buildOrgMetricsMarkdown } from "./core/orgMetrics";
-import { serializeHistory } from "./core/exporter";
+import {
+  ExportFormat,
+  serializeAttribution,
+  serializeHistory,
+  serializePeriods,
+  serializeRollups,
+} from "./core/exporter";
 import { getLog } from "./log";
 
 /** Runs one-time settings migrations, guarded by global-state flags. */
@@ -124,7 +130,6 @@ export function activate(context: vscode.ExtensionContext) {
           "customCreditLimit",
           "alertThresholds",
           "dailyBudget",
-          "reserveCredits",
           "notifyOnReset",
           "autoExport.enabled",
           "autoExport.folder",
@@ -145,46 +150,114 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Export the local snapshot history as JSON or CSV
+  // Export local usage history: daily rollups (the full billing period),
+  // archived billing periods, or the raw snapshot window.
   const exportHistoryCommand = vscode.commands.registerCommand(
     "vscode-copilot-insights.exportHistory",
     async () => {
-      const history = provider.snapshotHistory;
-      if (history.length === 0) {
+      const snapshots = provider.snapshotHistory;
+      const rollups = provider.rollupHistory;
+      const periods = provider.periodHistory;
+      const attribution = provider.attributionState;
+      const attributionRows = attribution?.buckets.length ?? 0;
+
+      if (snapshots.length === 0 && rollups.length === 0) {
         vscode.window.showInformationMessage(
-          vscode.l10n.t("No local snapshot history to export yet. History accumulates as quota data is refreshed.")
+          vscode.l10n.t("No local usage history to export yet. History accumulates as quota data is refreshed.")
         );
         return;
       }
 
-      const format = await vscode.window.showQuickPick(
-        [
-          { label: "JSON", description: vscode.l10n.t("Full snapshot objects"), ext: "json" },
-          { label: "CSV", description: vscode.l10n.t("timestamp, remaining, entitlement"), ext: "csv" },
-        ],
-        { placeHolder: vscode.l10n.t("Choose an export format") }
-      );
-      if (!format) {
+      interface ExportChoice extends vscode.QuickPickItem {
+        ext: ExportFormat;
+        file: string;
+        count: number;
+        serialize: (format: ExportFormat) => string;
+      }
+
+      const choices: ExportChoice[] = [
+        {
+          label: vscode.l10n.t("Daily usage — CSV"),
+          description: vscode.l10n.t("One row per day, {0} days", rollups.length),
+          ext: "csv",
+          file: "copilot-insights-daily",
+          count: rollups.length,
+          serialize: (format) => serializeRollups(rollups, format),
+        },
+        {
+          label: vscode.l10n.t("Daily usage — JSON"),
+          description: vscode.l10n.t("One object per day, {0} days", rollups.length),
+          ext: "json",
+          file: "copilot-insights-daily",
+          count: rollups.length,
+          serialize: (format) => serializeRollups(rollups, format),
+        },
+        {
+          label: vscode.l10n.t("Project attribution — CSV"),
+          description: vscode.l10n.t("One row per project and branch, {0} rows", attributionRows),
+          ext: "csv",
+          file: "copilot-insights-projects",
+          count: attributionRows,
+          serialize: (format) => serializeAttribution(attribution, format),
+        },
+        {
+          label: vscode.l10n.t("Billing periods — CSV"),
+          description: vscode.l10n.t("One row per completed period, {0} periods", periods.length),
+          ext: "csv",
+          file: "copilot-insights-periods",
+          count: periods.length,
+          serialize: (format) => serializePeriods(periods, format),
+        },
+        {
+          label: vscode.l10n.t("Raw snapshots — JSON"),
+          description: vscode.l10n.t("Recent snapshots only, {0} entries", snapshots.length),
+          ext: "json",
+          file: "copilot-insights-history",
+          count: snapshots.length,
+          serialize: (format) => serializeHistory(snapshots, format),
+        },
+        {
+          label: vscode.l10n.t("Raw snapshots — CSV"),
+          description: vscode.l10n.t("Recent snapshots only, {0} entries", snapshots.length),
+          ext: "csv",
+          file: "copilot-insights-history",
+          count: snapshots.length,
+          serialize: (format) => serializeHistory(snapshots, format),
+        },
+      ];
+
+      const choice = await vscode.window.showQuickPick(choices, {
+        placeHolder: vscode.l10n.t("Choose what to export"),
+      });
+      if (!choice) {
+        return;
+      }
+
+      if (choice.count === 0) {
+        vscode.window.showInformationMessage(
+          vscode.l10n.t("Nothing to export for that selection yet.")
+        );
         return;
       }
 
       const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.joinPath(
           vscode.Uri.file(os.homedir()),
-          `copilot-insights-history.${format.ext}`
+          `${choice.file}.${choice.ext}`
         ),
-        filters: format.ext === "json" ? { JSON: ["json"] } : { CSV: ["csv"] },
+        filters: choice.ext === "json" ? { JSON: ["json"] } : { CSV: ["csv"] },
       });
       if (!uri) {
         return;
       }
 
-      const content = serializeHistory(history, format.ext === "json" ? "json" : "csv");
-
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf8"));
-      getLog().info(`Exported ${history.length} snapshots to ${uri.fsPath}`);
+      await vscode.workspace.fs.writeFile(
+        uri,
+        Buffer.from(choice.serialize(choice.ext), "utf8")
+      );
+      getLog().info(`Exported ${choice.count} records to ${uri.fsPath}`);
       vscode.window.showInformationMessage(
-        vscode.l10n.t("Exported {0} snapshots.", history.length)
+        vscode.l10n.t("Exported {0} records.", choice.count)
       );
     }
   );
@@ -194,14 +267,14 @@ export function activate(context: vscode.ExtensionContext) {
     "vscode-copilot-insights.clearHistory",
     async () => {
       const result = await vscode.window.showWarningMessage(
-        vscode.l10n.t("Clear all locally stored Copilot Insights snapshot history? This cannot be undone."),
+        vscode.l10n.t("Clear all locally stored Copilot Insights usage history, including daily rollups and archived billing periods? This cannot be undone."),
         { modal: true },
         vscode.l10n.t("Clear")
       );
       if (result === vscode.l10n.t("Clear")) {
         provider.clearSnapshotHistory();
         vscode.window.showInformationMessage(
-          vscode.l10n.t("Copilot Insights snapshot history cleared.")
+          vscode.l10n.t("Copilot Insights usage history cleared.")
         );
       }
     }

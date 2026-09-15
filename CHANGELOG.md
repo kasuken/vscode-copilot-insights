@@ -1,5 +1,40 @@
 # Change Log
 
+# [5.2.0] - 2026-09-15
+
+### Added
+- **Where Your Credits Went**: a new sidebar section breaking this billing period's AI credit usage down by project, with a bar per project, its share of the period, and the git branches that contributed. The extension has always answered *how much is left* — this answers *what you spent it on*.
+- **`@insights /projects`**: the same breakdown in Copilot Chat.
+- **Attribution export**: `Copilot Insights: Export Usage History` gains a "Project attribution — CSV" option (one row per project and branch).
+- **`copilotInsights.attribution.mode` setting**: `project-and-branch` (default), `project` to skip branch names, or `off`. Switching it off also deletes everything attribution has recorded.
+
+### How attribution works, and what it can't do
+
+GitHub reports a credit balance, never what spent it, so attribution is inferred locally from timing: when the balance drops while one project has been in the foreground of this window for the whole interval, that project is credited. Two rules keep the estimate honest:
+
+- A drop is only attributed when the window stayed focused across the entire interval. Anything else — another VS Code window, VS Code in the background, the Copilot CLI, github.com — is left out rather than guessed at, and shows up as **Unattributed**.
+- Only attributed credits are stored. The unattributed remainder is derived from the period total at display time, so a second window observing the same usage can never inflate the numbers.
+
+It is an estimate, not an audit trail. Usage from a background agent working on one project while you have another in the foreground will be credited to the wrong one. Everything stays in VS Code global state on this machine — no project or branch name is ever sent anywhere.
+
+# [5.1.0] - 2026-09-15
+
+### Added
+- **Billing Periods section**: your current billing period at a glance — credits used, daily average, busiest day, days tracked, and overage so far — compared against the period before it. Once a reset is observed, completed periods are archived locally and listed, so you can finally see whether this month is heavier than the last.
+- **Durable daily usage history**: usage is now aggregated into one rollup per day and kept for months. The Sprint Burn-down, Daily AI Credit Usage chart, and Usage Heatmap now cover the whole billing period instead of the last few hours of raw snapshots.
+- **Export what's actually useful**: `Copilot Insights: Export Usage History` now offers daily usage (CSV or JSON), completed billing periods (CSV), and the raw snapshot window (CSV or JSON). Scheduled auto-export writes a `copilot-insights-daily.*` file alongside the existing `copilot-insights-history.*`.
+
+### Fixed
+- **Forecasts no longer get worse the more you use Copilot.** Predictions were built from pairs of raw snapshots between 1 and 72 hours apart, but an active session records a snapshot every polling interval — so nearly every pair was discarded, and the 90-snapshot cap evicted the older, widely spaced snapshots that did qualify. Heavy users could hold a full history and still see "Limited data: only 2 data points available". Weighted Prediction and Burn Rate Analysis now read whole tracked days, so confidence rises with usage instead of collapsing.
+- **History no longer runs out mid-period.** Raw snapshots were capped at 90 entries regardless of the time they covered, which for an active user was hours rather than weeks — while the burn-down claimed to chart the billing period and the heatmap bucketed by weekday. Raw snapshots are now kept by age (~48 hours, with a floor for light users) and the daily rollups carry the long view.
+- **`@insights` chat answers** for `/pacing` and `/forecast` now use the durable history too, so they stay accurate beyond the raw snapshot window.
+
+### Removed
+- **AI Credit Budget Planner**: the section asked you to type a daily request count and then told you it exceeded what's sustainable — a number the view already showed. The `copilotInsights.reserveCredits` setting is removed with it; any value you had set is simply ignored.
+
+### Changed
+- `Copilot Insights: Export Snapshot History` is now **Export Usage History**, and `Clear Snapshot History` is now **Clear Usage History** (it clears the daily rollups and archived periods too).
+
 # [5.0.1] - 2026-07-27
 
 ### Fixed

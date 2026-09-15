@@ -1,5 +1,13 @@
 import * as vscode from "vscode";
-import { CopilotUserData, CREDIT_COST_USD, LocalSnapshot } from "../../types";
+import {
+  AttributionState,
+  CopilotUserData,
+  CREDIT_COST_USD,
+  CurrentPeriod,
+  DailyRollup,
+  LocalSnapshot,
+  PeriodSummary,
+} from "../../types";
 import {
   calculateTimeSince,
   escapeHtml,
@@ -24,8 +32,20 @@ import {
   getWeightedPrediction,
   OVERAGE_COST_PER_CREDIT_USD,
 } from "../../core/predictions";
-import { computeUsageHeatmap, HEATMAP_BLOCK_HOURS } from "../../core/heatmap";
-import { calculateCreditBudgetPlan } from "../../core/planner";
+import {
+  computeUsageHeatmap,
+  computeUsageHeatmapFromRollups,
+  HEATMAP_BLOCK_HOURS,
+} from "../../core/heatmap";
+import {
+  buildRollupsFromSnapshots,
+  comparePeriods,
+  getUsedTodayFromRollups,
+  localDateKey,
+  rollupsInPeriod,
+  summarizePeriod,
+} from "../../core/rollups";
+import { summarizeAttribution } from "../../core/attribution";
 
 // Localization helper. Dynamic values from core (badge labels, mood texts)
 // are passed through t() at render time; translators provide those strings
@@ -39,8 +59,28 @@ export interface RenderConfig {
   customLimit: number;
   enableColoring: boolean;
   dailyBudget: number;
-  reserveCredits: number;
 }
+
+/**
+ * Durable usage history, alongside the short-lived raw snapshots.
+ *
+ * Raw snapshots cover only the last couple of days, so everything that spans
+ * the billing period — the burn-down, the heatmap, forecasts, and the period
+ * comparison — reads from the rollups instead.
+ */
+export interface HistoryContext {
+  /** Daily rollups, oldest first. */
+  rollups: readonly DailyRollup[];
+  /** Archived billing periods, oldest first. */
+  periods: readonly PeriodSummary[];
+  /** The period currently being tracked, when one is known. */
+  currentPeriod?: CurrentPeriod;
+  /** Credit attribution for the current period; absent when switched off. */
+  attribution?: AttributionState;
+}
+
+/** Empty durable history, for callers that have no rollups yet. */
+const EMPTY_HISTORY: HistoryContext = { rollups: [], periods: [] };
 
 /** A single plotted series or doughnut segment, described as raw data (no colors). */
 export interface ChartSeries {
@@ -96,8 +136,9 @@ export interface InsightsViewModel {
     quotas: string;
     quotaBreakdown: string;
     overage: string;
-    planner: string;
     history: string;
+    periods: string;
+    attribution: string;
     heatmap: string;
     weighted: string;
     trend: string;
@@ -158,10 +199,11 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 		<div id="section-quotaBreakdown"></div>
 		<div id="section-overage"></div>
 		<div id="section-history"></div>
+		<div id="section-periods"></div>
+		<div id="section-attribution"></div>
 		<div id="section-heatmap"></div>
 		<div id="section-weighted"></div>
 		<div id="section-trend"></div>
-		<div id="section-planner"></div>
 		<div id="section-summary"></div>
 		<div id="section-orgs"></div>
 		<div id="section-access"></div>
@@ -192,7 +234,8 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 export function buildViewModel(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
-  config: RenderConfig
+  config: RenderConfig,
+  history: HistoryContext = EMPTY_HISTORY
 ): InsightsViewModel {
   const quotaSnapshotsArray = data.quota_snapshots
     ? Object.values(data.quota_snapshots)
@@ -208,9 +251,9 @@ export function buildViewModel(
   const isStale =
     new Date().getTime() - new Date(asOfTime).getTime() > 3600000;
 
-  const history = renderHistorySection(data, snapshots, config);
-  const weighted = renderWeightedPredictionSection(data, snapshots, config.customLimit);
-  const trend = renderTrendSection(data, snapshots, config.customLimit);
+  const historySection = renderHistorySection(data, snapshots, history, config);
+  const weighted = renderWeightedPredictionSection(data, snapshots, history.rollups, config.customLimit);
+  const trend = renderTrendSection(data, snapshots, history.rollups, config.customLimit);
 
   return {
     state: "data",
@@ -221,104 +264,275 @@ export function buildViewModel(
       quotas: renderQuotasSection(data, asOfTime, config),
       quotaBreakdown: renderQuotaBreakdownSection(data, config),
       overage: renderOverageSection(data, snapshots, config),
-      history: history.html,
-      heatmap: renderHeatmapSection(snapshots),
+      history: historySection.html,
+      periods: renderPeriodsSection(data, history, config),
+      attribution: renderAttributionSection(data, history, config),
+      heatmap: renderHeatmapSection(snapshots, history.rollups),
       weighted: weighted.html,
       trend: trend.html,
-      planner: renderPlannerSection(data, config),
       summary: renderSummarySection(data),
       orgs: renderOrgsSection(data),
       access: renderAccessSection(data),
     },
-    charts: [...history.charts, ...weighted.charts, ...trend.charts],
+    charts: [...historySection.charts, ...weighted.charts, ...trend.charts],
     lastFetched: t("Last fetched: {0}", timeSince),
   };
 }
 
-function renderPlannerSection(data: CopilotUserData, config: RenderConfig): string {
-  const quota = findPremiumQuota(data.quota_snapshots);
-  if (!quota) {
+/**
+ * Credit attribution: which projects the period's usage went to.
+ *
+ * Inferred locally from timing — GitHub reports a balance, never what spent
+ * it — so the section leads with the estimate and is explicit about the part
+ * it could not account for rather than hiding it.
+ */
+function renderAttributionSection(
+  data: CopilotUserData,
+  history: HistoryContext,
+  config: RenderConfig
+): string {
+  if (!history.attribution || !history.currentPeriod) {
     return "";
   }
 
-  if (quota.unlimited) {
-    return `
-      <div class="section">
-        <h2 class="section-title">${t("AI Credit Budget Planner")}</h2>
-        <div class="quota-card planner-card">
-          <div class="quota-description">${t("Your AI credit quota is unlimited, so no daily budget is needed.")}</div>
-        </div>
+  const quota = findPremiumQuota(data.quota_snapshots);
+  if (!quota || quota.unlimited) {
+    return "";
+  }
+
+  const periodUsed = rollupsInPeriod(history.rollups, history.currentPeriod.startDate).reduce(
+    (sum, rollup) => sum + rollup.used,
+    0
+  );
+  const breakdown = summarizeAttribution(history.attribution, periodUsed);
+  if (!breakdown) {
+    return "";
+  }
+
+  const locale = vscode.env.language;
+  const num = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 1 });
+
+  /** A labelled row with a proportional bar. */
+  const bar = (
+    label: string,
+    credits: number,
+    share: number,
+    extraClass = "",
+    detail = ""
+  ) =>
+    `<div class="${extraClass ? `attribution-row ${extraClass}` : "attribution-row"}">` +
+    '<div class="attribution-head">' +
+    `<span class="attribution-name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>` +
+    '<span class="attribution-credits">' +
+    `${t("{0} credits", num(credits))} · ${num(share)}%` +
+    "</span>" +
+    "</div>" +
+    '<div class="attribution-track">' +
+    `<div class="attribution-fill" style="width: ${Math.min(100, Math.max(0, share))}%;"></div>` +
+    "</div>" +
+    (detail ? `<div class="attribution-branches">${detail}</div>` : "") +
+    "</div>";
+
+  const rows = breakdown.projects
+    .map((project) => {
+      const label = project.project || t("No folder open");
+      const detail = project.branches
+        .map(
+          (branch) =>
+            `<span class="attribution-branch">${escapeHtml(branch.branch)} ` +
+            `<span class="attribution-branch-credits">${num(branch.credits)}</span></span>`
+        )
+        .join("");
+      return bar(label, project.credits, project.share, "", detail);
+    })
+    .join("");
+
+  const otherRow =
+    breakdown.otherProjects > 0
+      ? bar(
+        t("{0} other projects", breakdown.projectCount - breakdown.projects.length),
+        breakdown.otherProjects,
+        breakdown.total > 0 ? (breakdown.otherProjects / breakdown.total) * 100 : 0,
+        "is-other"
+      )
+      : "";
+
+  const unattributedRow =
+    breakdown.unattributed > 0
+      ? bar(
+        t("Unattributed"),
+        breakdown.unattributed,
+        breakdown.unattributedShare,
+        "is-unattributed"
+      )
+      : "";
+
+  return `
+		<div class="section">
+			<h2 class="section-title">${t("Where Your Credits Went")}</h2>
+			<div class="quota-card">
+				<div class="quota-description">${t("Estimated from usage recorded while each project was in the foreground of this window.")}</div>
+				<div class="attribution-list">
+					${rows}
+					${otherRow}
+					${unattributedRow}
+				</div>
+				<div class="chart-footnote">${escapeHtml(
+    t("Unattributed covers usage from other windows, the Copilot CLI, or the web — anything this window could not account for.")
+  )}</div>
+			</div>
+		</div>
+	`;
+}
+
+/**
+ * Billing period memory: the period in progress measured against the last one,
+ * plus the archive of periods that have already reset.
+ *
+ * The Copilot API only ever describes the period in progress, so this is built
+ * entirely from locally archived summaries — which is why the comparison
+ * appears only once a reset has been observed.
+ */
+function renderPeriodsSection(
+  data: CopilotUserData,
+  history: HistoryContext,
+  config: RenderConfig
+): string {
+  if (!history.currentPeriod) {
+    return "";
+  }
+
+  const quota = findPremiumQuota(data.quota_snapshots);
+  if (!quota || quota.unlimited) {
+    return "";
+  }
+
+  const entitlement = getEffectiveQuota(quota, config.customLimit).entitlement;
+  const current = summarizePeriod(history.rollups, history.currentPeriod, entitlement);
+  if (!current) {
+    return "";
+  }
+
+  const previous =
+    history.periods.length > 0 ? history.periods[history.periods.length - 1] : null;
+  const comparison = comparePeriods(current, previous);
+
+  const locale = vscode.env.language;
+  const num = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 1 });
+  const dayLabel = (key: string) => {
+    const parsed = new Date(`${key}T00:00:00`);
+    return isNaN(parsed.getTime())
+      ? key
+      : parsed.toLocaleDateString(locale, { month: "short", day: "numeric" });
+  };
+  const range = (summary: PeriodSummary) =>
+    `${dayLabel(summary.startDate)}\u2005\u2013\u2005${dayLabel(summary.endDate)}`;
+
+  let compareHtml = "";
+  if (comparison.previous && comparison.usedDelta !== null) {
+    const delta = comparison.usedDelta;
+    const cls = delta > 0 ? "is-up" : delta < 0 ? "is-down" : "is-flat";
+    const arrow = delta > 0 ? "\u25b2" : delta < 0 ? "\u25bc" : "\u2192";
+    const amount = `${delta > 0 ? "+" : ""}${num(delta)}`;
+    const percent =
+      comparison.usedDeltaPercent !== null
+        ? ` (${comparison.usedDeltaPercent > 0 ? "+" : ""}${num(comparison.usedDeltaPercent)}%)`
+        : "";
+    compareHtml = `
+      <div class="period-compare ${cls}">
+        <span class="period-compare-arrow">${arrow}</span>
+        <span>${escapeHtml(
+          t("{0} credits{1} vs last period", amount, percent)
+        )}</span>
       </div>`;
   }
 
-  const effectiveQuota = getEffectiveQuota(quota, config.customLimit);
-  const remaining = Math.max(0, effectiveQuota.remaining);
-  const reserve = Number.isFinite(config.reserveCredits)
-    ? Math.max(0, config.reserveCredits)
-    : 0;
-  const baseline = calculateCreditBudgetPlan({
-    remainingCredits: remaining,
-    resetDate: data.quota_reset_date_utc,
-    plannedRequestsPerDay: 0,
-    creditMultiplier: 1,
-    reserveCredits: reserve,
-  });
-  const planned = Math.floor(baseline.sustainableRequestsPerDay * 10) / 10;
-  const initial = calculateCreditBudgetPlan({
-    remainingCredits: remaining,
-    resetDate: data.quota_reset_date_utc,
-    plannedRequestsPerDay: planned,
-    creditMultiplier: 1,
-    reserveCredits: reserve,
-  });
-  const format = (value: number) =>
-    Number.isFinite(value) ? value.toLocaleString(vscode.env.language, { maximumFractionDigits: 1 }) : "0";
-  const resetMs = new Date(data.quota_reset_date_utc).getTime();
-  const safeResetMs = Number.isFinite(resetMs) ? resetMs : 0;
-  const status = initial.hasValidReset
-    ? initial.meetsReserve
-      ? t("On budget — reserve preserved")
-      : t("Over budget — reduce planned requests")
-    : t("Reset date unavailable");
+  const row = (label: string, value: string) =>
+    `<div class="prediction-row"><span class="prediction-label">${label}</span>` +
+    `<span class="prediction-value">${value}</span></div>`;
+
+  const rows = [
+    row(t("Daily average:"), t("{0} credits/day", num(comparison.avgPerDay))),
+    current.peakDayDate
+      ? row(
+        t("Busiest day:"),
+        `${escapeHtml(dayLabel(current.peakDayDate))} \u00b7 ${t("{0} credits", num(current.peakDayUsed))}`
+      )
+      : "",
+    row(t("Days tracked:"), String(current.daysObserved)),
+    current.overageCredits > 0
+      ? row(
+        t("Overage so far:"),
+        `${t("{0} credits", num(current.overageCredits))} (~$${(current.overageCredits * CREDIT_COST_USD).toFixed(2)})`
+      )
+      : "",
+  ].join("");
+
+  // Newest first, and only the periods that actually recorded usage.
+  const archived = [...history.periods].reverse().slice(0, 6);
+  let archiveHtml = "";
+  if (archived.length > 0) {
+    const items = archived
+      .map((summary) => {
+        const partialBadge = summary.partial
+          ? `<span class="period-badge" title="${escapeHtml(
+            t("Tracking started after this period had already begun")
+          )}">${t("partial")}</span>`
+          : "";
+        return (
+          '<div class="period-row">' +
+          `<span class="period-range">${escapeHtml(range(summary))}${partialBadge}</span>` +
+          `<span class="period-used">${t("{0} credits", num(summary.totalUsed))}</span>` +
+          "</div>"
+        );
+      })
+      .join("");
+    archiveHtml =
+      '<div class="period-list">' +
+      `<div class="period-list-title">${t("Previous periods")}</div>` +
+      items +
+      "</div>";
+  }
+
+  // Be explicit about what the headline number can and cannot be compared
+  // against: mid-period totals are smaller by construction, and a period that
+  // was only partly tracked skews the percentage.
+  const notes: string[] = [];
+  if (!comparison.previous) {
+    notes.push(t("A comparison with the previous period appears after your next quota reset."));
+  } else if (comparison.unevenCoverage) {
+    notes.push(
+      t(
+        "This period is still running ({0} days tracked), compared against {1} days last period.",
+        current.daysObserved,
+        comparison.previous.daysObserved
+      )
+    );
+  }
+  if (current.partial) {
+    notes.push(
+      t("Tracking started on {0}, so this period's total covers part of it.", dayLabel(current.startDate))
+    );
+  }
 
   return `
-    <div class="section">
-      <h2 class="section-title">${t("AI Credit Budget Planner")}</h2>
-      <div id="credit-budget-planner" class="quota-card planner-card"
-        data-remaining="${remaining}"
-        data-reset-ms="${safeResetMs}"
-        data-default-reserve="${reserve}"
-        data-status-ok="${escapeHtml(t("On budget — reserve preserved"))}"
-        data-status-over="${escapeHtml(t("Over budget — reduce planned requests"))}"
-        data-status-reset="${escapeHtml(t("Reset date unavailable"))}">
-        <div class="planner-lead">
-          <span>${t("Sustainable until reset")}</span>
-          <strong id="planner-sustainable">${format(baseline.sustainableRequestsPerDay)}</strong>
-          <span>${t("requests/day")}</span>
-        </div>
-        <div class="quota-description">${t("Model premium requests locally using the AI-credit cost per request.")}</div>
-        <div class="planner-controls">
-          <label>
-            <span>${t("Planned requests/day")}</span>
-            <input id="planner-requests" type="number" min="0" step="0.1" value="${planned}">
-          </label>
-          <label>
-            <span>${t("Credit multiplier")}</span>
-            <input id="planner-multiplier" type="number" min="0.1" step="0.1" value="1">
-          </label>
-          <label>
-            <span>${t("Reserve target")}</span>
-            <input id="planner-reserve" type="number" min="0" step="0.1" value="${reserve}">
-          </label>
-        </div>
-        <div class="planner-results">
-          <div><span>${t("Planned spend/day")}</span><strong id="planner-spend">${format(initial.plannedCreditsPerDay)}</strong></div>
-          <div><span>${t("Projected at reset")}</span><strong id="planner-projected">${format(initial.projectedCreditsAtReset)}</strong></div>
-          <div><span>${t("Days to reset")}</span><strong id="planner-days">${format(initial.daysUntilReset)}</strong></div>
-        </div>
-        <div id="planner-status" class="planner-status ${initial.meetsReserve ? "is-ok" : "is-over"}">${status}</div>
-      </div>
-    </div>`;
+		<div class="section">
+			<h2 class="section-title">${t("Billing Periods")}</h2>
+			<div class="quota-card">
+				<div class="period-headline">
+					<span class="period-headline-value">${num(current.totalUsed)}</span>
+					<span class="period-headline-unit">${t("credits used this period")}</span>
+				</div>
+				${compareHtml}
+				<div class="pacing-separator" style="height: 1px; background-color: var(--vscode-panel-border); margin: 8px 0;"></div>
+				${rows}
+				${archiveHtml}
+				${notes
+        .map((note) => `<div class="chart-footnote">${escapeHtml(note)}</div>`)
+        .join("")}
+			</div>
+		</div>
+	`;
 }
 
 function renderSummarySection(data: CopilotUserData): string {
@@ -887,8 +1101,16 @@ function renderOverageSection(
  * deltas. Rendered as a plain HTML/CSS grid (no Chart.js) with intensity
  * expressed via opacity on the theme accent color.
  */
-function renderHeatmapSection(snapshots: readonly LocalSnapshot[]): string {
-  const heatmap = computeUsageHeatmap(snapshots);
+function renderHeatmapSection(
+  snapshots: readonly LocalSnapshot[],
+  rollups: readonly DailyRollup[]
+): string {
+  // Rollups span the whole billing period; raw snapshots only cover the last
+  // couple of days, so they are a fallback for a brand-new install.
+  const fromRollups = rollups.length > 0;
+  const heatmap = fromRollups
+    ? computeUsageHeatmapFromRollups(rollups)
+    : computeUsageHeatmap(snapshots);
   if (!heatmap || heatmap.maxValue <= 0) {
     return "";
   }
@@ -929,7 +1151,9 @@ function renderHeatmapSection(snapshots: readonly LocalSnapshot[]): string {
 					${headerCells}
 					${rows}
 				</div>
-				<div class="chart-footnote">${t("Usage intensity by weekday and time of day, from {0} local refresh intervals", heatmap.sampleCount)}</div>
+				<div class="chart-footnote">${fromRollups
+          ? t("Usage intensity by weekday and time of day, across {0} tracked days", rollups.length)
+          : t("Usage intensity by weekday and time of day, from {0} local refresh intervals", heatmap.sampleCount)}</div>
 			</div>
 		</div>
 	`;
@@ -938,9 +1162,10 @@ function renderHeatmapSection(snapshots: readonly LocalSnapshot[]): string {
 function renderTrendSection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
+  rollups: readonly DailyRollup[],
   customLimit: number
 ): { html: string; charts: ChartModel[] } {
-  const trend = getTrendPrediction(snapshots);
+  const trend = getTrendPrediction(snapshots, rollups);
 
   if (!trend) {
     return { html: "", charts: [] };
@@ -1017,7 +1242,9 @@ function renderTrendSection(
 						<span class="prediction-value">${trendIndicatorText}</span>
 					</div>
 					<div class="prediction-footer">
-						${t("Based on {0} measurements from local history", trend.dataPoints)}
+						${trend.source === "rollups"
+              ? t("Based on {0} days of local history", trend.dataPoints)
+              : t("Based on {0} measurements from local history", trend.dataPoints)}
 					</div>
 					${burnRateChartHtml}
 				</div>
@@ -1123,9 +1350,10 @@ function buildBurnRateComboChartModel(
 function renderWeightedPredictionSection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
+  rollups: readonly DailyRollup[],
   customLimit: number
 ): { html: string; charts: ChartModel[] } {
-  const prediction = getWeightedPrediction(snapshots, data, customLimit);
+  const prediction = getWeightedPrediction(snapshots, data, customLimit, rollups);
 
   if (!prediction) {
     return { html: "", charts: [] };
@@ -1150,9 +1378,13 @@ function renderWeightedPredictionSection(
   const conf = confidenceStyles[prediction.confidence];
 
   // Rebuild the confidence reason locally so it can be localized
-  const confidenceReason = prediction.confidence === "low"
-    ? t("Limited data: only {0} data points available", prediction.dataPoints)
-    : t("Based on {0} data points from local history", prediction.dataPoints);
+  const confidenceReason = prediction.source === "rollups"
+    ? prediction.confidence === "low"
+      ? t("Limited data: only {0} days tracked so far", prediction.dataPoints)
+      : t("Based on {0} days of local history", prediction.dataPoints)
+    : prediction.confidence === "low"
+      ? t("Limited data: only {0} data points available", prediction.dataPoints)
+      : t("Based on {0} data points from local history", prediction.dataPoints);
 
   // Determine if current usage pattern is sustainable
   const sustainabilityMsg = prediction.willExhaustBeforeReset
@@ -1326,9 +1558,70 @@ function buildForecastRangeChartModel(
   };
 }
 
+/** A balance observation on the timeline. */
+interface BalancePoint {
+  /** Epoch milliseconds. */
+  t: number;
+  /** AI credits left at that moment. */
+  remaining: number;
+  /** Plan entitlement observed at that moment. */
+  entitlement: number;
+}
+
+/**
+ * Merges the durable daily rollups with the recent raw snapshots into one
+ * ascending series of balance observations.
+ *
+ * Raw snapshots are pruned after a couple of days, so the earlier part of the
+ * billing period comes from the rollups: each completed day contributes its
+ * closing balance, placed at the end of that local day. Today is left to the
+ * raw snapshots, which still carry full detail.
+ */
+function mergedBalancePoints(
+  rollups: readonly DailyRollup[],
+  snapshots: readonly LocalSnapshot[],
+  now = new Date()
+): BalancePoint[] {
+  const today = localDateKey(now);
+  const points: BalancePoint[] = [];
+
+  for (const rollup of rollups) {
+    if (rollup.date >= today || !(rollup.entitlement > 0)) {
+      continue;
+    }
+    const dayEnd = new Date(`${rollup.date}T23:59:59`).getTime();
+    if (!Number.isFinite(dayEnd)) {
+      continue;
+    }
+    points.push({
+      t: dayEnd,
+      remaining: rollup.endRemaining,
+      entitlement: rollup.entitlement,
+    });
+  }
+
+  for (const snapshot of snapshots) {
+    if (!(snapshot.premium_entitlement > 0)) {
+      continue;
+    }
+    const t = new Date(snapshot.timestamp).getTime();
+    if (!Number.isFinite(t)) {
+      continue;
+    }
+    points.push({
+      t,
+      remaining: snapshot.premium_remaining,
+      entitlement: snapshot.premium_entitlement,
+    });
+  }
+
+  return points.sort((a, b) => a.t - b.t);
+}
+
 function renderHistorySection(
   data: CopilotUserData,
   snapshots: readonly LocalSnapshot[],
+  history: HistoryContext,
   config: RenderConfig
 ): { html: string; charts: ChartModel[] } {
   const comp = getSnapshotComparisons(snapshots);
@@ -1349,7 +1642,8 @@ function renderHistorySection(
 
   // "Used today" (since local midnight), with optional daily budget comparison.
   let todayRow = "";
-  const usedToday = getUsedToday(snapshots);
+  // Today's rollup outlives raw snapshot pruning, so prefer it.
+  const usedToday = getUsedTodayFromRollups(history.rollups) ?? getUsedToday(snapshots);
   if (usedToday !== null) {
     if (config.dailyBudget > 0) {
       const overBudget = usedToday > config.dailyBudget;
@@ -1366,8 +1660,12 @@ function renderHistorySection(
   // Prefer the sprint burn-down chart; fall back to the time-based chart when
   // we don't have a valid reset date to anchor the "sprint" window.
   const remainingUsedChart = buildRemainingUsedChartModel(data, config);
-  const chartResult = buildBurndownChartModel(data, snapshots, config) ?? buildSnapshotChartModel(snapshots);
-  const dailyUsageChart = buildDailyUsageChartModel(data, snapshots, config);
+  const balancePoints = mergedBalancePoints(history.rollups, snapshots);
+  const prediction = getWeightedPrediction(snapshots, data, config.customLimit, history.rollups);
+  const chartResult =
+    buildBurndownChartModel(data, balancePoints, prediction?.predictedDailyUsage ?? null, config) ??
+    buildSnapshotChartModel(balancePoints);
+  const dailyUsageChart = buildDailyUsageChartModel(data, history.rollups, snapshots, config);
 
   let chartHtml = "";
   const charts: ChartModel[] = [];
@@ -1503,34 +1801,26 @@ function buildRemainingUsedChartModel(data: CopilotUserData, config: RenderConfi
   };
 }
 
-function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResult | null {
-  if (snapshots.length < 2) {
+function buildSnapshotChartModel(ordered: readonly BalancePoint[]): ChartResult | null {
+  if (ordered.length < 2) {
     return null;
   }
 
-  // Filter out snapshots with invalid entitlement (keep negative remaining for overage tracking)
-  const validSnapshots = snapshots.filter(s => s.premium_entitlement > 0);
-  if (validSnapshots.length < 2) {
-    return null;
-  }
-
-  const ordered = [...validSnapshots].reverse();
   const count = ordered.length;
 
-  const vals = ordered.map(s => s.premium_remaining);
+  const vals = ordered.map(s => s.remaining);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
   const range = maxV - minV || 1;
   const yMin = minV - range * 0.1;
   const yMax = maxV + range * 0.1;
 
-  const points = ordered.map(s => ({ x: new Date(s.timestamp).getTime(), y: s.premium_remaining }));
+  const points = ordered.map(s => ({ x: s.t, y: s.remaining }));
   const xMin = points[0].x;
   const xMax = points[points.length - 1].x;
 
-  const formatOldest = (ts: string): string => {
-    const d = new Date(ts);
-    const mins = (Date.now() - d.getTime()) / (1000 * 60);
+  const formatOldest = (ts: number): string => {
+    const mins = (Date.now() - ts) / (1000 * 60);
     const hrs = mins / 60;
     if (mins < 1) { return "<1m ago"; }
     if (mins < 60) { return Math.floor(mins) + "m ago"; }
@@ -1558,7 +1848,7 @@ function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResu
     yMin,
     yMax,
     xTicks: [
-      { value: xMin, label: formatOldest(ordered[0].timestamp) },
+      { value: xMin, label: formatOldest(ordered[0].t) },
       { value: xMax, label: "now" },
     ],
     yTicks: [yMin, (yMin + yMax) / 2, yMax],
@@ -1569,7 +1859,7 @@ function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResu
     model,
     title: t("AI Credits Over Time"),
     legendHtml: "",
-    footnoteHtml: '<div class="chart-footnote">' + t("{0} snapshots · Based on local refreshes", count) + '</div>',
+    footnoteHtml: '<div class="chart-footnote">' + t("{0} observations · Based on local history", count) + '</div>',
   };
 }
 
@@ -1588,20 +1878,16 @@ function buildSnapshotChartModel(snapshots: readonly LocalSnapshot[]): ChartResu
  */
 function buildBurndownChartModel(
   data: CopilotUserData,
-  snapshots: readonly LocalSnapshot[],
+  balancePoints: readonly BalancePoint[],
+  predictedDailyUsage: number | null,
   config: RenderConfig
 ): ChartResult | null {
-  if (snapshots.length < 2) {
+  if (balancePoints.length < 2) {
     return null;
   }
 
-  // The most recent snapshot defines the current sprint's total budget.
-  const validSnapshots = snapshots.filter(s => s.premium_entitlement > 0);
-  if (validSnapshots.length < 2) {
-    return null;
-  }
-
-  const entitlement = validSnapshots[0].premium_entitlement;
+  // The most recent observation defines the current sprint's total budget.
+  const entitlement = balancePoints[balancePoints.length - 1].entitlement;
   if (!(entitlement > 0)) {
     return null;
   }
@@ -1625,14 +1911,10 @@ function buildBurndownChartModel(
   const now = Date.now();
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-  // Keep only snapshots that fall inside the current sprint window, oldest first.
-  const realInWindow = validSnapshots
-    .filter(s => {
-      const ts = new Date(s.timestamp).getTime();
-      return Number.isFinite(ts) && ts >= startTime && ts <= resetTime;
-    })
-    .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
-    .sort((a, b) => a.t - b.t);
+  // Keep only observations that fall inside the current sprint window.
+  const realInWindow = balancePoints
+    .filter(p => p.t >= startTime && p.t <= resetTime)
+    .map(p => ({ t: p.t, remaining: p.remaining }));
 
   // Seed a default data point on day 0 of the sprint (full entitlement) so the
   // burn-down always starts from the top-left corner, even before the first
@@ -1716,17 +1998,16 @@ function buildBurndownChartModel(
     }
   }
 
-  // Forecast line: dotted projection from the latest recorded snapshot to
+  // Forecast line: dotted projection from the latest recorded observation to
   // the reset date, declining at the predicted daily usage (clamped at 0).
   // Omitted when the local history is too thin to produce a prediction.
   let forecastLegend = "";
-  const prediction = getWeightedPrediction(snapshots, data, config.customLimit);
-  if (prediction && now < resetTime && realInWindow.length > 0) {
+  if (predictedDailyUsage !== null && now < resetTime && realInWindow.length > 0) {
     const latest = realInWindow[realInWindow.length - 1];
     const forecastPoints = computeForecastPoints(
       latest.t,
       Math.max(0, latest.remaining),
-      prediction.predictedDailyUsage,
+      predictedDailyUsage,
       resetTime
     );
     if (forecastPoints.length > 0) {
@@ -1763,7 +2044,7 @@ function buildBurndownChartModel(
   // On-track status: compare actual remaining now vs the ideal line at "now".
   const fractionElapsed = clamp((now - startTime) / periodMs, 0, 1);
   const idealRemainingNow = entitlement * (1 - fractionElapsed);
-  const actualRemainingNow = validSnapshots[0].premium_remaining;
+  const actualRemainingNow = balancePoints[balancePoints.length - 1].remaining;
   const delta = actualRemainingNow - idealRemainingNow;
   let statusText: string;
   let statusColor: string;
@@ -1820,65 +2101,49 @@ function buildBurndownChartModel(
   };
 }
 
+/**
+ * Per-day usage bars for the current billing period.
+ *
+ * Rollups already hold exactly this aggregation and survive the raw snapshot
+ * retention window, so the chart now covers the whole period instead of the
+ * last day or two. Raw snapshots are folded on the fly only when no rollups
+ * exist yet (a brand-new install).
+ */
 function buildDailyUsageChartModel(
   data: CopilotUserData,
+  rollups: readonly DailyRollup[],
   snapshots: readonly LocalSnapshot[],
   config: RenderConfig
 ): ChartResult | null {
-  if (snapshots.length < 2) {
+  const effectiveRollups =
+    rollups.length > 0 ? rollups : buildRollupsFromSnapshots(snapshots);
+  if (effectiveRollups.length === 0) {
     return null;
   }
 
-  const validSnapshots = snapshots
-    .filter(s => s.premium_entitlement > 0)
-    .map(s => ({ t: new Date(s.timestamp).getTime(), remaining: s.premium_remaining }))
-    .filter(s => Number.isFinite(s.t))
-    .sort((a, b) => a.t - b.t);
-  if (validSnapshots.length < 2) {
-    return null;
-  }
-
-  let startTime = validSnapshots[0].t;
   const resetTime = new Date(data.quota_reset_date_utc).getTime();
+  let windowStart = effectiveRollups[0].date;
   if (Number.isFinite(resetTime)) {
     const startDate = new Date(resetTime);
     startDate.setMonth(startDate.getMonth() - 1);
-    if (startDate.getTime() < resetTime) {
-      startTime = startDate.getTime();
-    }
+    windowStart = localDateKey(startDate);
   }
 
-  const dayKey = (ms: number) => {
-    const d = new Date(ms);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  };
   const formatDay = (ms: number) => {
     const d = new Date(ms);
     return (d.getMonth() + 1) + "/" + d.getDate();
   };
 
-  const dailyUsage = new Map<number, number>();
-  for (let i = 1; i < validSnapshots.length; i++) {
-    const prev = validSnapshots[i - 1];
-    const curr = validSnapshots[i];
-    if (curr.t < startTime || curr.t > (Number.isFinite(resetTime) ? resetTime : Date.now())) {
-      continue;
-    }
-    const used = prev.remaining - curr.remaining;
-    if (used <= 0) {
-      continue;
-    }
-    const key = dayKey(curr.t);
-    dailyUsage.set(key, (dailyUsage.get(key) ?? 0) + used);
-  }
+  const points = effectiveRollups
+    .filter(rollup => rollup.date >= windowStart && rollup.used > 0)
+    .map(rollup => ({ x: new Date(`${rollup.date}T00:00:00`).getTime(), y: rollup.used }))
+    .filter(point => Number.isFinite(point.x))
+    .sort((a, b) => a.x - b.x);
 
-  if (dailyUsage.size === 0) {
+  if (points.length === 0) {
     return null;
   }
 
-  const points = [...dailyUsage.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([x, y]) => ({ x, y }));
   const maxUsed = Math.max(...points.map(p => p.y));
   const yMax = Math.max(maxUsed, config.dailyBudget > 0 ? config.dailyBudget : 0) * 1.15 || 1;
   const xMin = points[0].x - 12 * 60 * 60 * 1000;
@@ -1920,6 +2185,6 @@ function buildDailyUsageChartModel(
     model,
     title: t("Daily AI Credit Usage"),
     legendHtml: "",
-    footnoteHtml: '<div class="chart-footnote">' + t("Estimated from local refresh deltas") + '</div>',
+    footnoteHtml: '<div class="chart-footnote">' + t("Estimated from locally recorded daily usage") + '</div>',
   };
 }

@@ -288,80 +288,130 @@ body {
 	padding: 4px 0;
 	font-style: italic;
 }
-.planner-card {
-	padding: 12px;
-}
-.planner-lead {
+.period-headline {
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
-	margin-bottom: 6px;
-	color: var(--vscode-descriptionForeground);
+	flex-wrap: wrap;
 }
-.planner-lead strong {
+.period-headline-value {
 	font-size: 24px;
-	color: var(--vscode-charts-green);
+	font-weight: 600;
+	color: var(--vscode-foreground);
 }
-.planner-controls {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 8px;
-	margin: 10px 0;
-}
-.planner-controls label {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	font-size: 10px;
+.period-headline-unit {
+	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
 }
-.planner-controls input {
-	min-width: 0;
-	box-sizing: border-box;
-	padding: 5px 6px;
-	border: 1px solid var(--vscode-input-border, transparent);
-	border-radius: 2px;
-	background: var(--vscode-input-background);
-	color: var(--vscode-input-foreground);
-	font: inherit;
-}
-.planner-controls input:focus {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -1px;
-}
-.planner-results {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 6px;
-}
-.planner-results div {
+.period-compare {
 	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	padding: 6px;
-	border-radius: 3px;
-	background: var(--vscode-textCodeBlock-background);
-}
-.planner-results span {
-	font-size: 10px;
-	color: var(--vscode-descriptionForeground);
-}
-.planner-status {
-	margin-top: 8px;
+	align-items: center;
+	gap: 5px;
+	margin-top: 4px;
 	font-size: 11px;
 	font-weight: 600;
 }
-.planner-status.is-ok {
-	color: var(--vscode-charts-green);
-}
-.planner-status.is-over {
+.period-compare.is-up {
 	color: var(--vscode-charts-red);
 }
-@media (max-width: 460px) {
-	.planner-controls,
-	.planner-results {
-		grid-template-columns: 1fr;
-	}
+.period-compare.is-down {
+	color: var(--vscode-charts-green);
+}
+.period-compare.is-flat {
+	color: var(--vscode-descriptionForeground);
+}
+.period-compare-arrow {
+	font-size: 9px;
+}
+.period-list {
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px solid var(--vscode-panel-border);
+}
+.period-list-title {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--vscode-descriptionForeground);
+	margin-bottom: 4px;
+}
+.period-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 0;
+	font-size: 11px;
+}
+.period-range {
+	color: var(--vscode-descriptionForeground);
+}
+.period-used {
+	font-variant-numeric: tabular-nums;
+}
+.attribution-list {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	margin-top: 8px;
+}
+.attribution-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+	font-size: 11px;
+	margin-bottom: 3px;
+}
+.attribution-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.attribution-credits {
+	flex-shrink: 0;
+	font-variant-numeric: tabular-nums;
+	color: var(--vscode-descriptionForeground);
+}
+.attribution-track {
+	height: 6px;
+	background: var(--vscode-textCodeBlock-background);
+	border-radius: 3px;
+	overflow: hidden;
+}
+.attribution-fill {
+	height: 100%;
+	min-width: 2px;
+	border-radius: 3px;
+	background: var(--vscode-charts-blue);
+}
+.attribution-row.is-other .attribution-fill {
+	background: var(--vscode-charts-purple);
+}
+.attribution-row.is-unattributed .attribution-fill {
+	background: var(--vscode-descriptionForeground);
+	opacity: 0.5;
+}
+.attribution-branches {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+	margin-top: 4px;
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
+.attribution-branch-credits {
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+.period-badge {
+	margin-left: 5px;
+	padding: 0 4px;
+	border-radius: 2px;
+	font-size: 9px;
+	text-transform: uppercase;
+	background: var(--vscode-textCodeBlock-background);
+	color: var(--vscode-descriptionForeground);
 }
 .quota-pacing-highlight {
 	background-color: var(--vscode-textCodeBlock-background);

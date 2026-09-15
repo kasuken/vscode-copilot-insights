@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { CopilotUserData, DEFAULT_POLLING_INTERVAL_SECONDS } from "../../types";
+import { AttributionMode, CopilotUserData, DEFAULT_POLLING_INTERVAL_SECONDS } from "../../types";
 import { fetchCopilotUserData } from "../../api/copilotApi";
 import {
   computeQuotaStats,
@@ -10,8 +10,10 @@ import {
   normalizePollingIntervalSeconds,
 } from "../../core/quota";
 import { generateMarkdownSummary } from "../../core/markdown";
-import { ExportFormat, serializeHistory } from "../../core/exporter";
+import { ExportFormat, serializeHistory, serializeRollups } from "../../core/exporter";
 import { SnapshotStore } from "../../core/history";
+import { AttributionContext } from "../../core/attribution";
+import { resolveWorkspaceContext } from "../workspaceContext";
 import { getLog } from "../../log";
 import { StatusBarManager } from "../statusBar";
 import {
@@ -42,6 +44,12 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private _startupRetryAttempt = 0;
   private _lastSuccessfulFetchMs = 0;
   private _backoffMultiplier = 1;
+  /**
+   * Whether this window has stayed focused since the last recorded
+   * observation. Only then can it account for the whole interval, so only then
+   * is a credit drop attributed to the project in the foreground.
+   */
+  private _focusedSinceLastObservation = false;
   private static readonly _maxBackoffMultiplier = 8;
   /** Skip visibility/focus-triggered refreshes when data is fresher than this. */
   private static readonly _visibilityFreshnessSeconds = 30;
@@ -67,7 +75,6 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         event.affectsConfiguration('copilotInsights.statusBar.enableColoredBackground') ||
         event.affectsConfiguration('copilotInsights.showMood') ||
         event.affectsConfiguration('copilotInsights.dailyBudget') ||
-        event.affectsConfiguration('copilotInsights.reserveCredits') ||
         event.affectsConfiguration('copilotInsights.customCreditLimit');
       const affectedPolling = event.affectsConfiguration(
         "copilotInsights.pollingIntervalSeconds"
@@ -85,6 +92,17 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       if (affectedPolling) {
         this._restartPolling(true);
+      }
+
+      if (event.affectsConfiguration("copilotInsights.attribution.mode")) {
+        // Turning attribution off also forgets what it collected.
+        if (this._getAttributionMode() === "off") {
+          this._snapshots.clearAttribution();
+          getLog().info("Credit attribution disabled — recorded projects cleared");
+        }
+        if (this._lastData) {
+          this._publishData(this._lastData);
+        }
       }
     });
     this._context.subscriptions.push(configurationChangeDisposable);
@@ -110,6 +128,9 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
         });
       } else {
         this._clearPollingTimer();
+        // Usage from here on could belong to any window, or to Copilot outside
+        // the editor, so the next observation is not attributable.
+        this._focusedSinceLastObservation = false;
       }
     });
     this._context.subscriptions.push(windowStateDisposable);
@@ -122,9 +143,54 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     this._cancelStartupRetry();
   }
 
-  /** Local snapshot history for the active account (newest first). */
+  /** Raw snapshot history for the active account (newest first). */
   public get snapshotHistory() {
     return this._snapshots.snapshots;
+  }
+
+  /** Daily usage rollups for the active account (oldest first). */
+  public get rollupHistory() {
+    return this._snapshots.rollups;
+  }
+
+  /** Archived billing periods for the active account (oldest first). */
+  public get periodHistory() {
+    return this._snapshots.periods;
+  }
+
+  /** Credit attribution recorded for the period in progress. */
+  public get attributionState() {
+    return this._snapshots.attribution;
+  }
+
+  /** Credits used so far in the period in progress. */
+  public get currentPeriodUsed() {
+    return this._snapshots.currentPeriodUsed;
+  }
+
+  private _getAttributionMode(): AttributionMode {
+    const mode = vscode.workspace
+      .getConfiguration("copilotInsights")
+      .get<string>("attribution.mode", "project-and-branch");
+    return mode === "off" || mode === "project" ? mode : "project-and-branch";
+  }
+
+  /**
+   * Builds the attribution context for an observation being recorded now.
+   * Returns undefined when attribution is switched off.
+   */
+  private _attributionContext(): AttributionContext | undefined {
+    const mode = this._getAttributionMode();
+    if (mode === "off") {
+      return undefined;
+    }
+
+    const { project, branch } = resolveWorkspaceContext(mode);
+    return {
+      project,
+      branch,
+      attributable: vscode.window.state.focused && this._focusedSinceLastObservation,
+    };
   }
 
   /** Clears the local snapshot history and refreshes the view. */
@@ -353,11 +419,20 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
 
       // Record snapshot for history tracking (per GitHub account)
       this._snapshots.setAccount(data.login);
+      // Attribute this fetch to a billing period before recording it, so a
+      // reset archives the period that just ended instead of folding into it.
+      this._snapshots.setResetDate(data.quota_reset_date_utc);
       const premiumQ = findPremiumQuota(data.quota_snapshots);
       if (premiumQ && !premiumQ.unlimited) {
         // Store raw API values — effective quota is applied at display time only
-        this._snapshots.add(premiumQ.remaining, premiumQ.entitlement);
+        this._snapshots.add(
+          premiumQ.remaining,
+          premiumQ.entitlement,
+          new Date(),
+          this._attributionContext()
+        );
       }
+      this._focusedSinceLastObservation = vscode.window.state.focused;
 
       this._lastData = data;
       this._lastSuccessfulFetchMs = Date.now();
@@ -431,12 +506,16 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       customLimit: config.get<number>("customCreditLimit", 0),
       enableColoring: config.get<boolean>("statusBar.enableColoredBackground", true),
       dailyBudget: config.get<number>("dailyBudget", 0),
-      reserveCredits: config.get<number>("reserveCredits", 0),
     };
   }
 
   private _publishData(data: CopilotUserData) {
-    const model = buildViewModel(data, this._snapshots.snapshots, this._getRenderConfig());
+    const model = buildViewModel(data, this._snapshots.snapshots, this._getRenderConfig(), {
+      rollups: this._snapshots.rollups,
+      periods: this._snapshots.periods,
+      currentPeriod: this._snapshots.currentPeriod,
+      attribution: this._getAttributionMode() === "off" ? undefined : this._snapshots.attribution,
+    });
     this._postState(model);
   }
 
@@ -602,18 +681,30 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       folder = path.join(os.homedir(), folder.slice(1));
     }
 
-    const target = vscode.Uri.file(path.join(folder, `copilot-insights-history.${format}`));
-    const content = serializeHistory(this._snapshots.snapshots, format);
+    // Two files: the raw snapshots (as before) and the daily rollups, which
+    // cover the whole billing period rather than the retention window.
+    const outputs: { target: vscode.Uri; content: string; label: string }[] = [
+      {
+        target: vscode.Uri.file(path.join(folder, `copilot-insights-history.${format}`)),
+        content: serializeHistory(this._snapshots.snapshots, format),
+        label: `${this._snapshots.snapshots.length} snapshots`,
+      },
+      {
+        target: vscode.Uri.file(path.join(folder, `copilot-insights-daily.${format}`)),
+        content: serializeRollups(this._snapshots.rollups, format),
+        label: `${this._snapshots.rollups.length} days`,
+      },
+    ];
 
     try {
-      await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+      for (const output of outputs) {
+        await vscode.workspace.fs.writeFile(output.target, Buffer.from(output.content, "utf8"));
+        getLog().info(`Auto-exported ${output.label} to ${output.target.fsPath}`);
+      }
       await this._context.globalState.update(this._lastAutoExportDateKey, today);
-      getLog().info(
-        `Auto-exported ${this._snapshots.snapshots.length} snapshots to ${target.fsPath}`
-      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      getLog().warn(`Auto-export failed for ${target.fsPath}: ${errorMessage}`);
+      getLog().warn(`Auto-export failed for ${folder}: ${errorMessage}`);
     }
   }
 }
