@@ -1,5 +1,13 @@
 # Change Log
 
+# [5.2.2] - 2026-09-17
+
+### Fixed
+- **Sidebar access summary layout**: the access pill container now wraps cleanly across widths, preventing the plan/access summary from feeling cramped or misaligned when the sidebar narrows.
+
+### Changed
+- **Refined access summary UI**: the sidebar plan summary now uses a nested top-level container for the access pills, resulting in a cleaner layout and more consistent spacing.
+
 # [5.2.1] - 2026-09-16
 
 ### Fixed
