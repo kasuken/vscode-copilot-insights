@@ -1,5 +1,10 @@
 # Change Log
 
+# [5.2.1] - 2026-09-16
+
+### Fixed
+- **Quota breakdown descriptions**: quota rows now explain what chat and code suggestions cover, including how unlimited plan features relate to GitHub AI Credits, without repeating the dedicated AI Credits description.
+
 # [5.2.0] - 2026-09-15
 
 ### Added
