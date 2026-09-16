@@ -220,10 +220,14 @@ body {
 	margin-bottom: 0;
 }
 .breakdown-row {
+	padding-bottom: 10px;
 	margin-bottom: 10px;
+	border-bottom: 1px solid var(--vscode-panel-border);
 }
 .breakdown-row:last-child {
+	padding-bottom: 0;
 	margin-bottom: 0;
+	border-bottom: none;
 }
 .breakdown-header {
 	display: flex;
