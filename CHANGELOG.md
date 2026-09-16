@@ -1,6 +1,11 @@
 # Change Log
 
-# [5.2.2] - 2026-09-17
+# [5.2.3] - 2026-09-16
+
+### Fixed
+- **Quota breakdown readability**: breakdown rows now have clearer spacing and separators, while the final row remains visually clean without an extra divider.
+
+# [5.2.2] - 2026-09-16
 
 ### Fixed
 - **Sidebar access summary layout**: the access pill container now wraps cleanly across widths, preventing the plan/access summary from feeling cramped or misaligned when the sidebar narrows.
