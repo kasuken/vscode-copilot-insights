@@ -109,16 +109,21 @@ body {
 }
 .access-pill {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 8px;
+	flex-direction: column;
+	gap: 3px;
 	min-width: 0;
 	background-color: var(--vscode-editor-background);
 	border: 1px solid var(--vscode-panel-border);
 	border-radius: 4px;
 	padding: 8px 10px;
 }
-.access-pill::before {
+.access-pill-top {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+.access-pill-top::before {
 	content: "";
 	width: 7px;
 	height: 7px;
@@ -126,10 +131,10 @@ body {
 	background-color: var(--vscode-descriptionForeground);
 	flex: 0 0 auto;
 }
-.access-pill.is-enabled::before {
+.access-pill.is-enabled .access-pill-top::before {
 	background-color: var(--vscode-charts-green);
 }
-.access-pill.is-disabled::before {
+.access-pill.is-disabled .access-pill-top::before {
 	background-color: var(--vscode-errorForeground);
 }
 .access-name {
@@ -143,7 +148,7 @@ body {
 .access-state {
 	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
-	margin-left: auto;
+	margin-left: 13px;
 }
 @media (max-width: 460px) {
 	.plan-summary {

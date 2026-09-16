@@ -551,19 +551,19 @@ function renderSummarySection(data: CopilotUserData): string {
 				</div>
         <div class="summary-access-grid" aria-label="${t("Copilot feature access")}">
           <div class="access-pill ${statusClass(data.chat_enabled)}" title="${t("Access to Copilot Chat features")}">
-            <span class="access-name">${t("Chat")}</span>
+            <div class="access-pill-top"><span class="access-name">${t("Chat")}</span></div>
             <span class="access-state">${enabledText(data.chat_enabled)}</span>
           </div>
           <div class="access-pill ${statusClass(data.cli_enabled)}" title="${t("Access to Copilot CLI features")}">
-            <span class="access-name">${t("CLI")}</span>
+            <div class="access-pill-top"><span class="access-name">${t("CLI")}</span></div>
             <span class="access-state">${enabledText(data.cli_enabled)}</span>
           </div>
           <div class="access-pill ${statusClass(data.is_mcp_enabled)}" title="${t("Model Context Protocol support")}">
-            <span class="access-name">${t("MCP")}</span>
+            <div class="access-pill-top"><span class="access-name">${t("MCP")}</span></div>
             <span class="access-state">${enabledText(data.is_mcp_enabled)}</span>
           </div>
           <div class="access-pill ${statusClass(data.editor_preview_features_enabled)}" title="${t("Editor preview features access")}">
-            <span class="access-name">${t("Preview")}</span>
+            <div class="access-pill-top"><span class="access-name">${t("Preview")}</span></div>
             <span class="access-state">${enabledText(data.editor_preview_features_enabled)}</span>
           </div>
         </div>
