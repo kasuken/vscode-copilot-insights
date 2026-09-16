@@ -635,6 +635,30 @@ function renderAccessSection(data: CopilotUserData): string {
 	`;
 }
 
+/**
+ * Short explanatory line for a quota card/row, describing what the quota
+ * type covers and, when unlimited, whether it still draws on AI Credits.
+ * Shared between the AI Credits hero card and the compact breakdown rows.
+ */
+function getQuotaCardDescription(quotaId: string, unlimited: boolean): string {
+  if (unlimited) {
+    if (quotaId === "chat") {
+      return t("Chat messages are not limited by message count, but calls to premium AI models and other metered Copilot capabilities may consume GitHub AI Credits.");
+    }
+    if (quotaId === "completions") {
+      return t("Code suggestions in the IDE are included with this plan and do not consume GitHub AI Credits.");
+    }
+    return t("This plan includes this feature without a tracked monthly balance. GitHub AI Credits may still apply separately to premium models and metered capabilities.");
+  }
+  if (quotaId === "chat") {
+    return t("Chat is your interactive Copilot conversation usage.");
+  }
+  if (quotaId === "completions") {
+    return t("Suggestions are inline code proposals while you type.");
+  }
+  return "";
+}
+
 function renderQuotasSection(
   data: CopilotUserData,
   asOfTime: string,
@@ -669,18 +693,10 @@ function renderQuotasSection(
           quotaTooltip = t("Suggestions are inline code suggestions shown while you type in the editor.");
         }
 
-        const quotaDescription = quota.quota_id === "chat"
-          ? t("Chat is your interactive Copilot conversation usage.")
-          : quota.quota_id === "completions"
-            ? t("Suggestions are inline code proposals while you type.")
-            : "";
+        const quotaDescription = getQuotaCardDescription(quota.quota_id, false);
 
         if (quota.unlimited) {
-          const unlimitedDescription = quota.quota_id === "chat"
-            ? t("Chat messages are not limited by message count, but calls to premium AI models and other metered Copilot capabilities may consume GitHub AI Credits.")
-            : quota.quota_id === "completions"
-              ? t("Code suggestions in the IDE are included with this plan and do not consume GitHub AI Credits.")
-              : t("This plan includes this feature without a tracked monthly balance. GitHub AI Credits may still apply separately to premium models and metered capabilities.");
+          const unlimitedDescription = getQuotaCardDescription(quota.quota_id, true);
           return `
 					<div class="quota-card">
 						<div class="quota-header">
@@ -983,6 +999,11 @@ function renderQuotaBreakdownSection(
   const rows = sorted
     .map((quota) => {
       const name = escapeHtml(formatQuotaName(quota.quota_id));
+      // AI Credits already has its own hero card with a full description above;
+      // repeating it here would just restate what's already on screen.
+      const description = quota.quota_id === "premium_interactions"
+        ? ""
+        : getQuotaCardDescription(quota.quota_id, quota.unlimited);
 
       if (quota.unlimited) {
         return `
@@ -991,6 +1012,7 @@ function renderQuotaBreakdownSection(
 						<span class="breakdown-name">${name}</span>
 						<span class="quota-badge unlimited" title="${t("You have unlimited usage for this feature")}">${t("Unlimited")}</span>
 					</div>
+					${description ? `<div class="quota-description">${description}</div>` : ""}
 				</div>
 			`;
       }
@@ -1015,6 +1037,7 @@ function renderQuotaBreakdownSection(
 					<span class="breakdown-name" title="${t("Usage for this quota type in the current billing period")}">${name}</span>
 					<span class="breakdown-detail"${isOverQuota ? ' style="color: var(--vscode-charts-red);"' : ''}>${detail}</span>
 				</div>
+				${description ? `<div class="quota-description">${description}</div>` : ""}
 				<div class="progress-bar progress-bar-mini">
 					<div class="progress-fill" style="width: ${clampedPercentUsed}%; background: ${barColor};"></div>
 				</div>
