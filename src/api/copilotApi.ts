@@ -1,6 +1,6 @@
 import { CopilotUserData } from "../types";
 
-const COPILOT_USER_ENDPOINT = "https://api.github.com/copilot_internal/user";
+const COPILOT_USER_PATH = "/copilot_internal/user";
 
 const FETCH_TIMEOUT_SECONDS = 15;
 
@@ -16,13 +16,16 @@ function normalizeCopilotPlan(plan: unknown): string {
  * Fetches and normalizes the Copilot account/quota data for the
  * authenticated user from GitHub's (internal, undocumented) endpoint.
  */
-export async function fetchCopilotUserData(accessToken: string): Promise<CopilotUserData> {
+export async function fetchCopilotUserData(
+  accessToken: string,
+  apiBaseUrl = "https://api.github.com"
+): Promise<CopilotUserData> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_SECONDS * 1000);
 
   let response: Response;
   try {
-    response = await fetch(COPILOT_USER_ENDPOINT, {
+    response = await fetch(`${apiBaseUrl}${COPILOT_USER_PATH}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Accept: "application/json",
