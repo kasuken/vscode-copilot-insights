@@ -1,5 +1,10 @@
 # Change Log
 
+# [5.3.0] - 2026-10-01
+
+### Added
+- **GitHub Enterprise support**: authenticate with GitHub Enterprise Cloud (`*.ghe.com`) and self-hosted GitHub Enterprise Server instances.
+
 # [5.2.3] - 2026-09-16
 
 ### Fixed
