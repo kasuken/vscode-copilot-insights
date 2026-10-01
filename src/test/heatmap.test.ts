@@ -1,6 +1,10 @@
 import * as assert from "assert";
-import { computeUsageHeatmap, HEATMAP_HOUR_BLOCKS } from "../core/heatmap";
-import { LocalSnapshot } from "../types";
+import {
+  computeUsageHeatmap,
+  computeUsageHeatmapFromRollups,
+  HEATMAP_HOUR_BLOCKS,
+} from "../core/heatmap";
+import { DailyRollup, LocalSnapshot } from "../types";
 
 /** Builds a newest-first snapshot at the given local time. */
 function makeSnapshot(localTime: string, remaining: number, entitlement = 300): LocalSnapshot {
@@ -80,5 +84,67 @@ suite("computeUsageHeatmap", () => {
     const heatmap = computeUsageHeatmap(history, 1);
     assert.ok(heatmap);
     assert.strictEqual(heatmap.sampleCount, 1);
+  });
+});
+
+suite("computeUsageHeatmapFromRollups", () => {
+  /** A rollup with usage placed in specific hour blocks. */
+  function rollup(date: string, blocks: Partial<Record<number, number>>): DailyRollup {
+    const cells = new Array<number>(HEATMAP_HOUR_BLOCKS).fill(0);
+    let used = 0;
+    for (const [index, value] of Object.entries(blocks)) {
+      cells[Number(index)] = value ?? 0;
+      used += value ?? 0;
+    }
+    return {
+      date,
+      used,
+      endRemaining: 100,
+      entitlement: 300,
+      samples: 2,
+      blocks: cells,
+    };
+  }
+
+  test("returns null below the minimum sample count", () => {
+    // 2026-09-07 is a Monday.
+    assert.strictEqual(computeUsageHeatmapFromRollups([rollup("2026-09-07", { 2: 5 })]), null);
+  });
+
+  test("maps each rollup onto its weekday row", () => {
+    const heatmap = computeUsageHeatmapFromRollups([
+      // 2026-09-06 is a Sunday, 2026-09-07 a Monday.
+      rollup("2026-09-06", { 1: 4, 3: 6 }),
+      rollup("2026-09-07", { 2: 10 }),
+    ]);
+
+    assert.ok(heatmap);
+    assert.strictEqual(heatmap.cells[0][1], 4);
+    assert.strictEqual(heatmap.cells[0][3], 6);
+    assert.strictEqual(heatmap.cells[1][2], 10);
+    assert.strictEqual(heatmap.maxValue, 10);
+    assert.strictEqual(heatmap.sampleCount, 3);
+  });
+
+  test("accumulates the same weekday across weeks", () => {
+    const heatmap = computeUsageHeatmapFromRollups([
+      rollup("2026-09-07", { 2: 10 }),
+      rollup("2026-09-14", { 2: 15 }),
+      rollup("2026-09-21", { 2: 5 }),
+    ]);
+
+    assert.strictEqual(heatmap?.cells[1][2], 30);
+  });
+
+  test("ignores an unparseable date", () => {
+    const heatmap = computeUsageHeatmapFromRollups([
+      rollup("not-a-date", { 1: 50 }),
+      rollup("2026-09-07", { 2: 10 }),
+      rollup("2026-09-08", { 2: 10 }),
+      rollup("2026-09-09", { 2: 10 }),
+    ]);
+
+    assert.strictEqual(heatmap?.maxValue, 10);
+    assert.strictEqual(heatmap?.sampleCount, 3);
   });
 });

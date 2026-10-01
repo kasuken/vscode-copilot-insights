@@ -12,6 +12,7 @@ import {
   getEffectiveQuota,
 } from "./core/quota";
 import { formatDate } from "./core/format";
+import { summarizeAttribution } from "./core/attribution";
 import { CopilotUserData } from "./types";
 import { CopilotInsightsViewProvider } from "./ui/webview/provider";
 
@@ -64,8 +65,9 @@ function streamPacing(
   stream: vscode.ChatResponseStream
 ): void {
   const history = provider.snapshotHistory;
-  const trend = getTrendPrediction(history);
-  const prediction = getWeightedPrediction(history, data, getCustomLimit());
+  const rollups = provider.rollupHistory;
+  const trend = getTrendPrediction(history, rollups);
+  const prediction = getWeightedPrediction(history, data, getCustomLimit(), rollups);
 
   stream.markdown(`## ${vscode.l10n.t("Pacing Analysis")}\n\n`);
 
@@ -117,7 +119,7 @@ function streamForecast(
   stream: vscode.ChatResponseStream
 ): void {
   const history = provider.snapshotHistory;
-  const prediction = getWeightedPrediction(history, data, getCustomLimit());
+  const prediction = getWeightedPrediction(history, data, getCustomLimit(), provider.rollupHistory);
   const premiumQuota = findPremiumQuota(data.quota_snapshots);
 
   stream.markdown(`## ${vscode.l10n.t("Usage Forecast")}\n\n`);
@@ -163,6 +165,57 @@ function streamForecast(
   }
 }
 
+/** Lists which projects the period's credits went to. */
+function streamProjects(
+  provider: CopilotInsightsViewProvider,
+  stream: vscode.ChatResponseStream
+): void {
+  const breakdown = summarizeAttribution(
+    provider.attributionState,
+    provider.currentPeriodUsed
+  );
+
+  if (!breakdown) {
+    stream.markdown(
+      vscode.l10n.t(
+        "No project attribution recorded yet. It accumulates while you work with a folder open, and needs the `copilotInsights.attribution.mode` setting to be enabled."
+      ) + "\n"
+    );
+    return;
+  }
+
+  stream.markdown(`### ${vscode.l10n.t("Where your credits went this period")}\n\n`);
+
+  for (const project of breakdown.projects) {
+    const name = project.project || vscode.l10n.t("No folder open");
+    stream.markdown(
+      `- **${name}** — ${vscode.l10n.t("{0} credits", project.credits)} (${project.share}%)\n`
+    );
+    for (const branch of project.branches) {
+      stream.markdown(
+        `  - ${branch.branch} — ${vscode.l10n.t("{0} credits", branch.credits)}\n`
+      );
+    }
+  }
+
+  if (breakdown.otherProjects > 0) {
+    const remaining = breakdown.projectCount - breakdown.projects.length;
+    stream.markdown(
+      `- ${vscode.l10n.t("{0} other projects", remaining)} — ${vscode.l10n.t("{0} credits", breakdown.otherProjects)}\n`
+    );
+  }
+
+  if (breakdown.unattributed > 0) {
+    stream.markdown(
+      `- ${vscode.l10n.t("Unattributed")} — ${vscode.l10n.t("{0} credits", breakdown.unattributed)} (${breakdown.unattributedShare}%)\n`
+    );
+  }
+
+  stream.markdown(
+    `\n${vscode.l10n.t("Attribution is estimated from which project was in the foreground when credits were spent.")}\n`
+  );
+}
+
 /**
  * Registers the `@insights` chat participant. Responses are built
  * deterministically from the live quota data and local snapshot history —
@@ -193,6 +246,9 @@ export function registerChatParticipant(
         break;
       case "quota":
         streamQuota(data, stream);
+        break;
+      case "projects":
+        streamProjects(provider, stream);
         break;
       default:
         stream.markdown(generateMarkdownSummary(data, getCustomLimit(), vscode.env.language));

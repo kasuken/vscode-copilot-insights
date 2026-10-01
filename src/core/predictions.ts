@@ -1,5 +1,12 @@
-import { CopilotUserData, CREDIT_COST_USD, LocalSnapshot, QuotaSnapshot } from "../types";
+import {
+  CopilotUserData,
+  CREDIT_COST_USD,
+  DailyRollup,
+  LocalSnapshot,
+  QuotaSnapshot,
+} from "../types";
 import { findPremiumQuota, getEffectiveQuota } from "./quota";
+import { localDateKey } from "./rollups";
 
 /**
  * Estimated billing rate for premium requests consumed beyond the plan
@@ -8,6 +15,13 @@ import { findPremiumQuota, getEffectiveQuota } from "./quota";
  */
 export const OVERAGE_COST_PER_CREDIT_USD = CREDIT_COST_USD;
 
+/**
+ * Where a usage estimate's data points came from. `rollups` means whole
+ * observed days (the durable tier); `snapshots` means raw interval pairs, used
+ * only until at least two complete days have been rolled up.
+ */
+export type UsageDataSource = "rollups" | "snapshots";
+
 export interface WeightedPrediction {
   predictedDailyUsage: number;
   confidence: "low" | "medium" | "high";
@@ -15,6 +29,7 @@ export interface WeightedPrediction {
   daysUntilExhaustion: number | null;
   willExhaustBeforeReset: boolean;
   dataPoints: number;
+  source: UsageDataSource;
 }
 
 export interface TrendPrediction {
@@ -23,6 +38,7 @@ export interface TrendPrediction {
   trend: "accelerating" | "slowing" | "stable";
   trendIndicator: string;
   dataPoints: number;
+  source: UsageDataSource;
 }
 
 /**
@@ -58,16 +74,80 @@ function getDailyUsageData(history: readonly LocalSnapshot[]): { usage: number; 
   return usageData;
 }
 
+/**
+ * Daily usage points from rollups: one per completed day that recorded usage.
+ *
+ * This is the preferred source. {@link getDailyUsageData} can only use raw
+ * snapshot pairs between 1 and 72 hours apart, so an active session — which
+ * records a snapshot every polling interval — leaves it with almost nothing to
+ * work with, and the heavier the usage the fewer points survive. Rollups are
+ * one point per day by construction, so accuracy now improves with usage
+ * instead of collapsing.
+ *
+ * Today is excluded: it is still accumulating and would drag the average down.
+ * Days with no recorded usage are excluded too, matching the snapshot-based
+ * behaviour, which keeps the estimate conservative.
+ */
+export function getDailyUsageFromRollups(
+  rollups: readonly DailyRollup[],
+  now = new Date()
+): { usage: number; timestamp: Date }[] {
+  const today = localDateKey(now);
+  const usageData: { usage: number; timestamp: Date }[] = [];
+
+  // Rollups are ascending by date; predictions elsewhere assume newest first.
+  for (let i = rollups.length - 1; i >= 0; i--) {
+    const rollup = rollups[i];
+    if (rollup.date >= today || rollup.used <= 0) {
+      continue;
+    }
+    // Midday anchors the point away from DST boundaries.
+    const timestamp = new Date(`${rollup.date}T12:00:00`);
+    if (isNaN(timestamp.getTime())) {
+      continue;
+    }
+    usageData.push({ usage: rollup.used, timestamp });
+  }
+
+  return usageData;
+}
+
+/** Minimum complete days before rollups are preferred over raw snapshots. */
+const MIN_ROLLUP_DAYS = 2;
+
+/**
+ * Picks the best available usage series: rollups once enough complete days
+ * exist, otherwise the raw snapshot pairs (which is all a fresh install has).
+ */
+function selectUsageData(
+  history: readonly LocalSnapshot[],
+  rollups: readonly DailyRollup[],
+  now?: Date
+): { usageData: { usage: number; timestamp: Date }[]; source: UsageDataSource } {
+  const fromRollups = getDailyUsageFromRollups(rollups, now);
+  if (fromRollups.length >= MIN_ROLLUP_DAYS) {
+    return { usageData: fromRollups, source: "rollups" };
+  }
+
+  const fromSnapshots = getDailyUsageData(history);
+  if (fromSnapshots.length > fromRollups.length) {
+    return { usageData: fromSnapshots, source: "snapshots" };
+  }
+
+  return { usageData: fromRollups, source: "rollups" };
+}
+
 export function getWeightedPrediction(
   history: readonly LocalSnapshot[],
   data: CopilotUserData,
-  customLimit: number
+  customLimit: number,
+  rollups: readonly DailyRollup[] = []
 ): WeightedPrediction | null {
-  if (history.length < 2) {
+  if (history.length < 2 && rollups.length === 0) {
     return null;
   }
 
-  const usageData = getDailyUsageData(history);
+  const { usageData, source } = selectUsageData(history, rollups);
 
   if (usageData.length === 0) {
     return null;
@@ -117,6 +197,7 @@ export function getWeightedPrediction(
     daysUntilExhaustion,
     willExhaustBeforeReset,
     dataPoints: totalDataPoints,
+    source,
   };
 }
 
@@ -232,12 +313,15 @@ export function computeForecastPoints(
   ];
 }
 
-export function getTrendPrediction(history: readonly LocalSnapshot[]): TrendPrediction | null {
-  if (history.length < 3) {
+export function getTrendPrediction(
+  history: readonly LocalSnapshot[],
+  rollups: readonly DailyRollup[] = []
+): TrendPrediction | null {
+  if (history.length < 3 && rollups.length === 0) {
     return null;
   }
 
-  const usageData = getDailyUsageData(history);
+  const { usageData, source } = selectUsageData(history, rollups);
 
   if (usageData.length < 2) {
     return null;
@@ -275,5 +359,6 @@ export function getTrendPrediction(history: readonly LocalSnapshot[]): TrendPred
     trend,
     trendIndicator,
     dataPoints: usageData.length,
+    source,
   };
 }

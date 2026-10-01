@@ -2,11 +2,12 @@ import * as assert from "assert";
 import {
   computeForecastPoints,
   estimateOverage,
+  getDailyUsageFromRollups,
   getTrendPrediction,
   getWeightedPrediction,
   OVERAGE_COST_PER_CREDIT_USD,
 } from "../core/predictions";
-import { CopilotUserData, LocalSnapshot } from "../types";
+import { CopilotUserData, DailyRollup, LocalSnapshot } from "../types";
 import { makeQuota } from "./quota.test";
 
 /**
@@ -216,5 +217,150 @@ suite("computeForecastPoints", () => {
     assert.deepStrictEqual(computeForecastPoints(start, 100, 5, start - DAY_MS), []);
     assert.deepStrictEqual(computeForecastPoints(NaN, 100, 5, reset), []);
     assert.deepStrictEqual(computeForecastPoints(start, -1, 5, reset), []);
+  });
+});
+
+suite("getDailyUsageFromRollups", () => {
+  const now = new Date(2026, 8, 10, 15, 0, 0);
+
+  /** A completed-day rollup. */
+  function rollup(date: string, used: number): DailyRollup {
+    return {
+      date,
+      used,
+      endRemaining: 100,
+      entitlement: 300,
+      samples: 5,
+      blocks: [0, 0, used, 0, 0, 0],
+    };
+  }
+
+  test("returns one point per completed day", () => {
+    const points = getDailyUsageFromRollups(
+      [rollup("2026-09-08", 20), rollup("2026-09-09", 30)],
+      now
+    );
+
+    assert.strictEqual(points.length, 2);
+    // Newest first, matching the snapshot-derived series.
+    assert.deepStrictEqual(points.map((p) => p.usage), [30, 20]);
+  });
+
+  test("excludes today, which is still accumulating", () => {
+    const points = getDailyUsageFromRollups(
+      [rollup("2026-09-09", 30), rollup("2026-09-10", 2)],
+      now
+    );
+
+    assert.strictEqual(points.length, 1);
+    assert.strictEqual(points[0].usage, 30);
+  });
+
+  test("excludes days with no recorded usage", () => {
+    const points = getDailyUsageFromRollups(
+      [rollup("2026-09-08", 0), rollup("2026-09-09", 30)],
+      now
+    );
+
+    assert.strictEqual(points.length, 1);
+  });
+});
+
+suite("predictions from rollups", () => {
+  /**
+   * Dense history: a snapshot every 5 minutes, which is what an active
+   * session produces. Every consecutive pair is under the 1-hour floor that
+   * the snapshot-based extraction requires, so it yields nothing on its own.
+   */
+  function denseHistory(count: number): LocalSnapshot[] {
+    const now = Date.now();
+    return Array.from({ length: count }, (_, i) => ({
+      timestamp: new Date(now - i * 5 * 60 * 1000).toISOString(),
+      premium_remaining: 100 + i,
+      premium_entitlement: 300,
+    }));
+  }
+
+  /** Completed-day rollups ending yesterday. */
+  function recentRollups(usedPerDay: number[]): DailyRollup[] {
+    const today = new Date();
+    return usedPerDay.map((used, i) => {
+      const day = new Date(today);
+      day.setDate(day.getDate() - (usedPerDay.length - i));
+      const date = [
+        day.getFullYear(),
+        `${day.getMonth() + 1}`.padStart(2, "0"),
+        `${day.getDate()}`.padStart(2, "0"),
+      ].join("-");
+      return {
+        date,
+        used,
+        endRemaining: 100,
+        entitlement: 300,
+        samples: 10,
+        blocks: [0, 0, used, 0, 0, 0],
+      };
+    });
+  }
+
+  test("dense snapshot history alone produces no prediction", () => {
+    // This is the failure the rollups fix: heavy usage starves the estimate.
+    const prediction = getWeightedPrediction(denseHistory(80), makeUserData(), 0);
+    assert.strictEqual(prediction, null);
+  });
+
+  test("rollups rescue the prediction for the same dense history", () => {
+    const prediction = getWeightedPrediction(
+      denseHistory(80),
+      makeUserData(),
+      0,
+      recentRollups([20, 30, 40])
+    );
+
+    assert.ok(prediction);
+    assert.strictEqual(prediction.source, "rollups");
+    assert.strictEqual(prediction.predictedDailyUsage, 30);
+    assert.strictEqual(prediction.dataPoints, 3);
+  });
+
+  test("confidence rises with the number of tracked days", () => {
+    const week = getWeightedPrediction(
+      denseHistory(10),
+      makeUserData(),
+      0,
+      recentRollups([10, 10, 10, 10, 10, 10, 10])
+    );
+    const couple = getWeightedPrediction(
+      denseHistory(10),
+      makeUserData(),
+      0,
+      recentRollups([10, 10])
+    );
+
+    assert.strictEqual(week?.confidence, "high");
+    assert.strictEqual(couple?.confidence, "low");
+  });
+
+  test("falls back to snapshots until two days are rolled up", () => {
+    // Widely spaced snapshots still work on their own.
+    const prediction = getWeightedPrediction(
+      makeHistory([100, 130, 160], 24),
+      makeUserData(),
+      0,
+      recentRollups([25])
+    );
+
+    assert.strictEqual(prediction?.source, "snapshots");
+  });
+
+  test("trend analysis reads from rollups too", () => {
+    const trend = getTrendPrediction(denseHistory(80), recentRollups([10, 10, 40, 40]));
+
+    assert.ok(trend);
+    assert.strictEqual(trend.source, "rollups");
+    assert.strictEqual(trend.overallBurnRate, 25);
+    // Recent half of the series (newest first) is the two 40-credit days.
+    assert.strictEqual(trend.recentBurnRate, 40);
+    assert.strictEqual(trend.trend, "accelerating");
   });
 });

@@ -5,7 +5,6 @@
 (function () {
   const vscode = acquireVsCodeApi();
   let lastModel;
-  let plannerValues;
 
   const stateElements = {
     loading: document.getElementById("state-loading"),
@@ -20,84 +19,10 @@
     }
   }
 
-  function readPlannerValues() {
-    const requests = document.getElementById("planner-requests");
-    const multiplier = document.getElementById("planner-multiplier");
-    const reserve = document.getElementById("planner-reserve");
-    const planner = document.getElementById("credit-budget-planner");
-    return requests && multiplier && reserve
-      ? {
-          requests: requests.value,
-          multiplier: multiplier.value,
-          reserve: reserve.value,
-          defaultReserve: planner ? planner.dataset.defaultReserve : undefined,
-        }
-      : plannerValues;
-  }
-
   function persistState() {
     if (lastModel) {
-      vscode.setState({ model: lastModel, planner: readPlannerValues() });
+      vscode.setState({ model: lastModel });
     }
-  }
-
-  function initializePlanner() {
-    const planner = document.getElementById("credit-budget-planner");
-    if (!planner) {
-      return;
-    }
-    const requests = document.getElementById("planner-requests");
-    const multiplier = document.getElementById("planner-multiplier");
-    const reserve = document.getElementById("planner-reserve");
-    if (plannerValues) {
-      requests.value = plannerValues.requests;
-      multiplier.value = plannerValues.multiplier;
-      reserve.value = plannerValues.defaultReserve === planner.dataset.defaultReserve
-        ? plannerValues.reserve
-        : planner.dataset.defaultReserve;
-    }
-
-    const update = () => {
-      const nonnegative = (value) => Number.isFinite(value) ? Math.max(0, value) : 0;
-      const remaining = nonnegative(Number(planner.dataset.remaining));
-      const resetMs = Number(planner.dataset.resetMs);
-      const days = Number.isFinite(resetMs) && resetMs > Date.now()
-        ? (resetMs - Date.now()) / (24 * 60 * 60 * 1000)
-        : 0;
-      const requestCount = nonnegative(Number(requests.value));
-      const enteredMultiplier = Number(multiplier.value);
-      const costMultiplier = Number.isFinite(enteredMultiplier) && enteredMultiplier > 0
-        ? enteredMultiplier
-        : 1;
-      const reserveTarget = nonnegative(Number(reserve.value));
-      const spend = requestCount * costMultiplier;
-      const sustainable = days > 0
-        ? Math.max(0, remaining - reserveTarget) / days / costMultiplier
-        : 0;
-      const projected = days > 0 ? remaining - spend * days : remaining;
-      const meetsReserve = days > 0 && projected >= reserveTarget;
-      const format = (value) => value.toLocaleString(undefined, { maximumFractionDigits: 1 });
-
-      document.getElementById("planner-sustainable").textContent = format(sustainable);
-      document.getElementById("planner-spend").textContent = format(spend);
-      document.getElementById("planner-projected").textContent = format(projected);
-      document.getElementById("planner-days").textContent = format(days);
-      const status = document.getElementById("planner-status");
-      status.textContent = days <= 0
-        ? planner.dataset.statusReset
-        : meetsReserve
-          ? planner.dataset.statusOk
-          : planner.dataset.statusOver;
-      status.classList.toggle("is-ok", meetsReserve);
-      status.classList.toggle("is-over", !meetsReserve);
-      plannerValues = readPlannerValues();
-      persistState();
-    };
-
-    for (const input of [requests, multiplier, reserve]) {
-      input.addEventListener("input", update);
-    }
-    update();
   }
 
   // --- Chart.js rendering -------------------------------------------------
@@ -362,7 +287,6 @@
         showState("error");
         return;
       case "data": {
-        plannerValues = readPlannerValues();
         for (const [id, html] of Object.entries(model.sections || {})) {
           const el = document.getElementById("section-" + id);
           if (el) {
@@ -376,7 +300,6 @@
             ? [model.chart]
             : [];
         showState("data");
-        initializePlanner();
         // Draw after showState so the canvas has layout to size against.
         renderCharts(lastChartModels);
         return;
@@ -416,7 +339,6 @@
   const savedState = vscode.getState();
   if (savedState && savedState.model) {
     lastModel = savedState.model;
-    plannerValues = savedState.planner;
     applyModel(savedState.model);
   } else {
     lastModel = savedState;
