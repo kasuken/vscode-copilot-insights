@@ -14,7 +14,8 @@ import { ExportFormat, serializeHistory, serializeRollups } from "../../core/exp
 import { SnapshotStore } from "../../core/history";
 import { getGitHubHostConfig } from "../../core/githubHost";
 import { AttributionContext } from "../../core/attribution";
-import { resolveWorkspaceContext } from "../workspaceContext";
+import { resolveWorkspaceContext, WorkspaceIntervalTracker } from "../workspaceContext";
+import { MAX_OBSERVATION_GAP_MS, ObservationStore } from "../../core/observations";
 import { getLog } from "../../log";
 import { StatusBarManager } from "../statusBar";
 import {
@@ -39,6 +40,11 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
   private readonly _lastAutoExportDateKey =
     "copilotInsights.lastAutoExportDate";
   private readonly _snapshots: SnapshotStore;
+  private readonly _observations: ObservationStore;
+  private readonly _workspaceTracker = new WorkspaceIntervalTracker();
+  private _refreshFailed = false;
+  private _accountGeneration = 0;
+  private _previousBalance?: { account: string; period: string; entitlement: number; time: number };
   private _pollingTimer?: ReturnType<typeof setInterval>;
   private _inflightLoad?: { promise: Promise<boolean>; silent: boolean };
   private _startupRetryTimer?: ReturnType<typeof setTimeout>;
@@ -64,6 +70,9 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     private readonly _statusBar: StatusBarManager
   ) {
     this._snapshots = new SnapshotStore(_context.globalState);
+    this._observations = new ObservationStore(_context.globalState);
+    this._configureObservations();
+    this._context.subscriptions.push(this._workspaceTracker);
 
     // Listen for configuration changes to update the status bar and sidebar in real-time
     const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
@@ -96,19 +105,20 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
 
       if (event.affectsConfiguration("github-enterprise.uri")) {
-        this._lastData = undefined;
-        void this.loadCopilotData({ silent: true });
-  }
+        this._reloadAccount();
+      }
 
       if (event.affectsConfiguration("copilotInsights.attribution.mode")) {
+        this._workspaceTracker.invalidate();
         // Turning attribution off also forgets what it collected.
         if (this._getAttributionMode() === "off") {
           this._snapshots.clearAttribution();
           getLog().info("Credit attribution disabled — recorded projects cleared");
         }
-        if (this._lastData) {
-          this._publishData(this._lastData);
-        }
+      }
+      if (event.affectsConfiguration("copilotInsights")) {
+        this._configureObservations();
+        if (this._lastData) { this._publishData(this._lastData); }
       }
     });
     this._context.subscriptions.push(configurationChangeDisposable);
@@ -117,7 +127,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     const sessionChangeDisposable = vscode.authentication.onDidChangeSessions(
       (event) => {
         if (event.provider.id === "github" || event.provider.id === "github-enterprise") {
-          void this.loadCopilotData({ silent: true });
+          this._reloadAccount();
         }
       }
     );
@@ -195,13 +205,16 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     return {
       project,
       branch,
-      attributable: vscode.window.state.focused && this._focusedSinceLastObservation,
+      attributable: vscode.window.state.focused && this._focusedSinceLastObservation && this._workspaceTracker.isStable(),
     };
   }
 
   /** Clears the local snapshot history and refreshes the view. */
   public clearSnapshotHistory() {
     this._snapshots.clear();
+    this._observations.clear();
+    this._previousBalance = undefined;
+    this._workspaceTracker.invalidate();
     getLog().info("Snapshot history cleared");
     if (this._lastData) {
       this._publishData(this._lastData);
@@ -391,7 +404,22 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     return promise;
   }
 
+  private _reloadAccount(): void {
+    this._accountGeneration++;
+    this._lastData = undefined;
+    this._lastSuccessfulFetchMs = 0;
+    this._previousBalance = undefined;
+    this._focusedSinceLastObservation = false;
+    this._observations.interrupt();
+    this._workspaceTracker.invalidate();
+    this._postState({ state: "loading" });
+    this._statusBar.showSignIn();
+    // Do not coalesce a new-account refresh into an old-account request.
+    void Promise.resolve(this._inflightLoad?.promise).then(() => this.loadCopilotData({ silent: true }));
+  }
+
   private async _doLoadCopilotData(silent: boolean): Promise<boolean> {
+    const generation = this._accountGeneration;
     try {
       const hostConfig = getGitHubHostConfig();
 
@@ -406,7 +434,9 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
           : { createIfNone: true }
       );
 
+      if (generation !== this._accountGeneration) { return false; }
       if (!session) {
+        this._observations.interrupt();
         if (silent) {
           // No session available without prompting — show a sign-in hint
           // instead of an error (unless we already have data to display).
@@ -424,26 +454,53 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
 
       const data = await fetchCopilotUserData(session.accessToken, hostConfig.apiBaseUrl);
+      if (generation !== this._accountGeneration) { return false; }
+      if (typeof data.login !== "string" || !data.login.trim()) {
+        throw new Error(vscode.l10n.t("GitHub did not report an account identity. No usage observation was saved."));
+      }
+      const account = `${hostConfig.apiBaseUrl}:${data.login.trim().toLowerCase()}`;
 
       // Record snapshot for history tracking (per GitHub account)
+      this._observations.setAccount(account);
       this._snapshots.setAccount(data.login);
+      this._configureObservations();
       // Attribute this fetch to a billing period before recording it, so a
       // reset archives the period that just ended instead of folding into it.
       this._snapshots.setResetDate(data.quota_reset_date_utc);
       const premiumQ = findPremiumQuota(data.quota_snapshots);
       if (premiumQ && !premiumQ.unlimited) {
+        const now = new Date();
+        const previous = this._previousBalance;
+        const context = this._attributionContext();
+        if (context) {
+          context.attributable = context.attributable && previous?.account === account &&
+            previous.period === data.quota_reset_date_utc && previous.entitlement === premiumQ.entitlement &&
+            now.getTime() > previous.time && now.getTime() - previous.time <= MAX_OBSERVATION_GAP_MS;
+        }
+        const interval = this._observations.observe(
+          premiumQ.remaining, premiumQ.entitlement, data.quota_reset_date_utc, now.getTime(), context
+        );
         // Store raw API values — effective quota is applied at display time only
         this._snapshots.add(
           premiumQ.remaining,
           premiumQ.entitlement,
-          new Date(),
-          this._attributionContext()
+          now,
+          context
         );
+        this._previousBalance = Number.isFinite(premiumQ.remaining) && Number.isFinite(premiumQ.entitlement) && premiumQ.entitlement > 0
+          ? { account, period: data.quota_reset_date_utc, entitlement: premiumQ.entitlement, time: now.getTime() }
+          : undefined;
+        if (interval) { this._maybeNotifySpike(); }
+      } else {
+        this._observations.interrupt();
+        this._previousBalance = undefined;
       }
       this._focusedSinceLastObservation = vscode.window.state.focused;
+      this._workspaceTracker.reset();
 
       this._lastData = data;
       this._lastSuccessfulFetchMs = Date.now();
+      this._refreshFailed = false;
       this._cancelStartupRetry();
       this._statusBar.update(data, this._snapshots.snapshots);
       this._publishData(data);
@@ -453,6 +510,11 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       getLog().debug(`Copilot data refreshed for ${data.login || "unknown user"}`);
       return true;
     } catch (error) {
+      if (generation !== this._accountGeneration) { return false; }
+      this._observations.interrupt();
+      this._focusedSinceLastObservation = false;
+      this._refreshFailed = true;
+      if (this._lastData) { this._publishData(this._lastData); }
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
 
@@ -470,7 +532,7 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       }
 
       getLog().error(`Failed to load Copilot data: ${errorMessage}`);
-      this._publishError(errorMessage);
+      if (!this._lastData) { this._publishError(errorMessage); }
       vscode.window.showErrorMessage(
         vscode.l10n.t("Failed to load Copilot data: {0}", errorMessage)
       );
@@ -514,6 +576,13 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       customLimit: config.get<number>("customCreditLimit", 0),
       enableColoring: config.get<boolean>("statusBar.enableColoredBackground", true),
       dailyBudget: config.get<number>("dailyBudget", 0),
+      personalBudget: config.get<number>("personalBudget", 0),
+      workCalendar: {
+        weekdays: config.get<number[]>("workCalendar.weekdays", [1, 2, 3, 4, 5]),
+        daysOff: config.get<string[]>("workCalendar.daysOff", []),
+        reserve: config.get<number>("workCalendar.reserveCredits", 0),
+        personalBudget: config.get<number>("personalBudget", 0),
+      },
     };
   }
 
@@ -523,8 +592,38 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
       periods: this._snapshots.periods,
       currentPeriod: this._snapshots.currentPeriod,
       attribution: this._getAttributionMode() === "off" ? undefined : this._snapshots.attribution,
+      observations: this._observations.data,
+      timelineEnabled: this._observations.enabled,
+      lastSuccessfulFetch: this._lastSuccessfulFetchMs,
+      refreshFailed: this._refreshFailed,
+      trackingInterrupted: this._observations.trackingInterrupted,
     });
     this._postState(model);
+  }
+
+  private _configureObservations(): void {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    this._observations.configure(config.get<number>("timeline.retentionDays", 7), this._getAttributionMode());
+    this._snapshots.applyAttributionPrivacy(this._getAttributionMode());
+  }
+
+  private _maybeNotifySpike(): void {
+    const config = vscode.workspace.getConfiguration("copilotInsights");
+    const window = this._observations.takeSpike({
+      enabled: config.get<boolean>("spikeAlerts.enabled", false),
+      credits: config.get<number>("spikeAlerts.credits", 50),
+      windowMinutes: config.get<number>("spikeAlerts.windowMinutes", 5),
+      cooldownMinutes: config.get<number>("spikeAlerts.cooldownMinutes", 30),
+    });
+    if (!window) { return; }
+    const action = vscode.l10n.t("Open usage timeline");
+    void vscode.window.showWarningMessage(
+      vscode.l10n.t("Observed {0} Copilot credits consumed between {1} and {2} ({3} minutes). GitHub accounting may be delayed; this is not per-request usage or a billing cap.",
+        window.credits, new Date(window.start).toLocaleString(), new Date(window.end).toLocaleString(),
+        ((window.end - window.start) / 60_000).toFixed(1)), action
+    ).then(selected => {
+      if (selected === action) { void vscode.commands.executeCommand("copilotInsights.sidebarView.focus"); }
+    });
   }
 
   private _publishError(error: string) {

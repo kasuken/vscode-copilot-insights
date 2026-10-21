@@ -9,6 +9,70 @@ import {
 } from "../types";
 import { makeQuota } from "./quota.test";
 
+suite("Observation, confidence and budget rendering", () => {
+  test("escapes workspace and branch labels and distinguishes gap observations", () => {
+    const now = Date.now();
+    const history: HistoryContext = {
+      rollups: [], periods: [], timelineEnabled: true,
+      observations: {
+        intervals: [
+          { start: now - 120000, end: now - 60000, credits: 10, gap: false, project: "<img src=x onerror=alert(1)>", branch: "\"<script>bad</script>" },
+          { start: now - 60000, end: now, credits: 20, gap: true },
+        ], gaps: 1, firstObserved: now - 120000, lastChange: now,
+      },
+      lastSuccessfulFetch: now,
+    };
+    const model = buildViewModel(makeUserData(), [], makeConfig(), history);
+    assert.ok(model.sections.timeline.includes("&lt;img"));
+    assert.ok(model.sections.timeline.includes("&lt;script&gt;"));
+    assert.ok(!model.sections.timeline.includes("<img"));
+    assert.ok(model.sections.timeline.includes("Unattributed"));
+    assert.ok(model.sections.timeline.includes("not a real-time spike"));
+    assert.ok(model.sections.confidence.includes("10.00 of 30.00 (33.3%)"));
+    assert.ok(model.sections.confidence.includes("partial"));
+    assert.ok(model.sections.confidence.includes("does not mean real-time"));
+  });
+
+  test("cached rerenders preserve fetch and balance-change timestamps and failed-refresh confidence", () => {
+    const fetch = Date.now() - 600000;
+    const history: HistoryContext = {
+      rollups: [], periods: [], timelineEnabled: true, lastSuccessfulFetch: fetch,
+      refreshFailed: true,
+      observations: { intervals: [], gaps: 0, firstObserved: fetch, lastChange: fetch - 600000 },
+    };
+    const first = buildViewModel(makeUserData(), [], makeConfig(), history);
+    const second = buildViewModel(makeUserData(), [], makeConfig({ personalBudget: 100 }), history);
+    assert.strictEqual(first.sections.confidence, second.sections.confidence);
+    assert.ok(second.sections.confidence.includes("latest refresh failed"));
+    assert.ok(second.sections.confidence.includes("Last successful fetch"));
+    assert.ok(second.sections.confidence.includes("Last observed balance change"));
+  });
+
+  test("disabled tracking hides timeline but retains fetch confidence", () => {
+    const model = buildViewModel(makeUserData(), [], makeConfig(), {
+      rollups: [], periods: [], timelineEnabled: false, observations: { intervals: [], gaps: 0 }, lastSuccessfulFetch: Date.now(),
+    });
+    assert.strictEqual(model.sections.timeline, "");
+    assert.ok(model.sections.confidence.includes("tracking is disabled"));
+  });
+
+  test("below-allowance personal targets do not alter quota, overage or forecast sections", () => {
+    const data = makeUserData({ quota_snapshots: {
+      premium_interactions: makeQuota({ entitlement: 300, remaining: -20, quota_remaining: 0, overage_permitted: true }),
+    } });
+    const original = buildViewModel(data, [], makeConfig({ customLimit: 500 }));
+    const budget = buildViewModel(data, [], makeConfig({ customLimit: 500, personalBudget: 100 }));
+    for (const section of ["quotas", "overage", "weighted", "trend", "periods"] as const) {
+      assert.strictEqual(budget.sections[section], original.sections[section]);
+    }
+    assert.ok(budget.sections.budget.includes("Included plan allowance: 300"));
+    assert.ok(budget.sections.budget.includes("Personal monthly target: 100"));
+    assert.ok(budget.sections.budget.includes("balance: 320.00"));
+    assert.ok(budget.sections.budget.includes("Custom advisory limit: 500"));
+    assert.ok(budget.sections.budget.includes("do not change or enforce GitHub billing"));
+  });
+});
+
 function makeConfig(overrides: Partial<RenderConfig> = {}): RenderConfig {
   return {
     showMood: true,

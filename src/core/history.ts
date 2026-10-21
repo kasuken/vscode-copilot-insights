@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import {
   ATTRIBUTION_KEY,
   AttributionState,
+  AttributionMode,
+  AttributionBucket,
   CURRENT_PERIOD_KEY,
   CurrentPeriod,
   DAILY_ROLLUP_KEY,
@@ -233,7 +235,38 @@ export class SnapshotStore {
    * it collected.
    */
   clearAttribution(): void {
-    this._setAttribution(undefined);
+    this.applyAttributionPrivacy("off");
+  }
+
+  /** Privacy settings remove excluded metadata from current and archived accounts. */
+  applyAttributionPrivacy(mode: AttributionMode): void {
+    if (mode === "project-and-branch") { return; }
+    const clean = (buckets: AttributionBucket[]): AttributionBucket[] => {
+      const projects = new Map<string, AttributionBucket>();
+      for (const bucket of buckets) {
+        const previous = projects.get(bucket.project);
+        projects.set(bucket.project, {
+          ...bucket, branch: "",
+          credits: Math.round(((previous?.credits ?? 0) + bucket.credits) * 100) / 100,
+          lastDate: previous && previous.lastDate > bucket.lastDate ? previous.lastDate : bucket.lastDate,
+        });
+      }
+      return [...projects.values()];
+    };
+    const cleanState = (state: AttributionState | undefined) =>
+      mode === "off" || !state ? undefined : { ...state, buckets: clean(state.buckets) };
+    const cleanPeriods = (periods: PeriodSummary[]) => periods.map(period => ({
+      ...period, attribution: mode === "off" || !period.attribution ? undefined : clean(period.attribution),
+    }));
+    this._attribution = cleanState(this._attribution);
+    this._periods = cleanPeriods(this._periods);
+    for (const key of this._globalState.keys()) {
+      if (key === ATTRIBUTION_KEY || key.startsWith(`${ATTRIBUTION_KEY}.`)) {
+        void this._globalState.update(key, cleanState(this._globalState.get<AttributionState>(key)));
+      } else if (key === PERIOD_SUMMARY_KEY || key.startsWith(`${PERIOD_SUMMARY_KEY}.`)) {
+        void this._globalState.update(key, cleanPeriods(this._globalState.get<PeriodSummary[]>(key, [])));
+      }
+    }
   }
 
   private _setCurrentPeriod(period: CurrentPeriod): void {
@@ -266,7 +299,9 @@ export class SnapshotStore {
     context?: AttributionContext
   ): void {
     // Don't record observations with invalid entitlement values
-    if (premiumEntitlement <= 0) {
+    if (!Number.isFinite(premiumRemaining) || !Number.isFinite(premiumEntitlement) ||
+        Math.abs(premiumRemaining) > Number.MAX_SAFE_INTEGER || premiumEntitlement > Number.MAX_SAFE_INTEGER ||
+        premiumEntitlement <= 0 || !Number.isFinite(now.getTime())) {
       return;
     }
 
