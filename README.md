@@ -49,6 +49,63 @@ It focuses on operational visibility, not team analytics. The extension helps an
 
 ## What You Get
 
+### Local observation timeline, confidence, and spike alerts
+
+The **Recent usage timeline** records balance drops between successful observations,
+not individual requests or models. Each entry shows both interval timestamps and credits.
+Project/branch labels are **estimates** only when the window stayed focused and its
+workspace context stayed stable throughout the interval; other drops remain unattributed.
+No past attribution is reconstructed from aggregate project buckets. GitHub may account
+for usage late, so even a freshly fetched balance is not a real-time activity log.
+
+`copilotInsights.timeline.retentionDays` defaults to 7 (0–30). Storage is local,
+account/host-scoped, and capped at 5,000 intervals, including idle observations.
+The sidebar shows the newest 100 drops. Set retention to **0** to disable and delete
+this observation history for all stored accounts (also disables spike detection).
+**Clear Usage History** clears the active account's timeline along with existing history.
+Attribution **off** deletes stored project/branch metadata; **project** removes branches.
+These privacy changes also apply to previously stored accounts.
+
+Optional **spike alerts** are separate from monthly percentage alerts:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `copilotInsights.spikeAlerts.enabled` | `false` | Enable observed-consumption notifications |
+| `copilotInsights.spikeAlerts.credits` | `50` | Minimum credits in the observation window |
+| `copilotInsights.spikeAlerts.windowMinutes` | `5` | Minimum complete window; actual poll boundaries are shown |
+| `copilotInsights.spikeAlerts.cooldownMinutes` | `30` | Account-scoped cooldown, retained across resets/restarts |
+
+Windows include idle polls and must be contiguous. Failed refreshes, restarts,
+account transitions, and gaps longer than five minutes break detection; a long gap
+is never presented as a real-time spike. First observations, resets and entitlement
+changes establish a new baseline. Alerts open the sidebar and explicitly warn about
+delayed accounting; they do not impose hard caps or shut down Copilot.
+
+**Data confidence** separates last successful fetch from last observed balance change,
+shows tracking gaps and partial coverage, and reports attribution coverage of retained
+observed credits. Failed refreshes keep cached data and confidence details visible.
+
+### Personal budget and working calendar
+
+The **Budget and billing** panel separates included plan allowance, an optional
+`copilotInsights.personalBudget` (0 disables), and GitHub-reported overage permission.
+Personal targets can be below the allowance without changing usage, billable overage,
+history, forecasts, or existing `customCreditLimit` semantics and monthly alerts.
+No local target changes or enforces GitHub billing; use GitHub's billing controls.
+
+Work-calendar capacity divides remaining advisory capacity, less
+`copilotInsights.workCalendar.reserveCredits` (default 0), by remaining workdays:
+
+- `copilotInsights.workCalendar.weekdays`: defaults to Monday–Friday (`[1,2,3,4,5]`;
+  Sunday is 0). An empty list gives zero workdays.
+- `copilotInsights.workCalendar.daysOff`: local `YYYY-MM-DD` dates to exclude.
+- Today's date counts if it is a workday; days are counted in local time up to the
+  reset instant, using calendar arithmetic across daylight-saving transitions.
+
+Capacity respects a personal target when set, otherwise the allowance or existing
+above-allowance custom limit. Zero remaining workdays yields zero credits per workday.
+This is advisory pacing, not a prediction of request counts.
+
 ### Sidebar view
 
 The Copilot Insights activity bar view shows:

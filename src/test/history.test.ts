@@ -40,6 +40,42 @@ class FakeMemento implements vscode.Memento {
   }
 }
 
+suite("Attribution metadata privacy", () => {
+  test("project mode collapses archived and current branches across accounts; off deletes metadata", () => {
+    const memory = new FakeMemento();
+    const store = new SnapshotStore(memory);
+    const buckets = [
+      { project: "repo", branch: "one", credits: 10, lastDate: "2026-10-19" },
+      { project: "repo", branch: "two", credits: 20, lastDate: "2026-10-20" },
+    ];
+    for (const account of ["alice", "bob"]) {
+      void memory.update(`${ATTRIBUTION_KEY}.${account}`, { resetDate: "2026-11-01", buckets });
+      void memory.update(`${PERIOD_SUMMARY_KEY}.${account}`, [{ attribution: buckets }]);
+    }
+    store.setAccount("alice");
+    store.applyAttributionPrivacy("project");
+    assert.strictEqual(store.attribution?.buckets.length, 1);
+    assert.strictEqual(store.attribution?.buckets[0].credits, 30);
+    assert.strictEqual(store.attribution?.buckets[0].branch, "");
+    assert.strictEqual(memory.get<PeriodSummary[]>(`${PERIOD_SUMMARY_KEY}.bob`)?.[0].attribution?.[0].branch, "");
+    store.clearAttribution();
+    assert.strictEqual(memory.get(`${ATTRIBUTION_KEY}.bob`), undefined);
+    assert.strictEqual(memory.get<PeriodSummary[]>(`${PERIOD_SUMMARY_KEY}.alice`)?.[0].attribution, undefined);
+    assert.strictEqual(store.periods[0].attribution, undefined);
+  });
+
+  test("invalid balance data cannot poison existing rollups or snapshots", () => {
+    const store = new SnapshotStore(new FakeMemento());
+    store.setAccount("alice");
+    store.add(100, 300);
+    store.add(NaN, 300);
+    store.add(50, Infinity);
+    store.add(50, 300, new Date("invalid"));
+    assert.strictEqual(store.snapshots.length, 1);
+    assert.strictEqual(store.snapshots[0].premium_remaining, 100);
+  });
+});
+
 function snapshotAt(hoursAgo: number, remaining: number): LocalSnapshot {
   return {
     timestamp: new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString(),

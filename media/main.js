@@ -5,6 +5,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
   let lastModel;
+  let previousDataModel;
 
   const stateElements = {
     loading: document.getElementById("state-loading"),
@@ -275,6 +276,11 @@
       return;
     }
 
+    // Only carry UI state between consecutive updates for the same account.
+    // Loading (including account reload), sign-in and error states break continuity.
+    const preserveDisclosures = previousDataModel && previousDataModel.account === model.account;
+    previousDataModel = model.state === "data" ? model : undefined;
+
     switch (model.state) {
       case "loading":
         showState("loading");
@@ -287,10 +293,29 @@
         showState("error");
         return;
       case "data": {
+        const disclosures = new Map();
+        let focusedDisclosure;
+        if (preserveDisclosures) {
+          for (const details of stateElements.data.querySelectorAll("details.observation-details[id]")) {
+            disclosures.set(details.id, details.open);
+            if (document.hasFocus() && details.querySelector("summary") === document.activeElement) {
+              focusedDisclosure = details.id;
+            }
+          }
+        }
         for (const [id, html] of Object.entries(model.sections || {})) {
           const el = document.getElementById("section-" + id);
           if (el) {
             el.innerHTML = html;
+          }
+        }
+        let summaryToFocus;
+        for (const details of stateElements.data.querySelectorAll("details.observation-details[id]")) {
+          if (disclosures.has(details.id)) {
+            details.open = disclosures.get(details.id);
+          }
+          if (details.id === focusedDisclosure) {
+            summaryToFocus = details.querySelector("summary");
           }
         }
         document.getElementById("last-updated").textContent = model.lastFetched || "";
@@ -302,6 +327,8 @@
         showState("data");
         // Draw after showState so the canvas has layout to size against.
         renderCharts(lastChartModels);
+        // Never revive focus for a removed disclosure or scroll the refreshed view.
+        summaryToFocus?.focus({ preventScroll: true });
         return;
       }
     }
