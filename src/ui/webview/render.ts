@@ -207,11 +207,11 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 
 	<div id="state-data" class="state hidden">
 		<div id="section-stale"></div>
-		<div id="section-confidence"></div>
 		<div id="section-quotas"></div>
-		<div id="section-budget"></div>
-		<div id="section-timeline"></div>
 		<div id="section-quotaBreakdown"></div>
+		<div id="section-budget"></div>
+		<div id="section-confidence"></div>
+		<div id="section-timeline"></div>
 		<div id="section-overage"></div>
 		<div id="section-history"></div>
 		<div id="section-periods"></div>
@@ -306,42 +306,87 @@ function observationDate(time: number | undefined): string {
     : t("Not observed");
 }
 
+/** Compact local dates; exact instants remain available to assistive technology. */
+function observationTime(time: number | undefined): string {
+  if (!time || !Number.isFinite(time)) { return escapeHtml(t("Not observed")); }
+  const date = new Date(time);
+  const label = date.toLocaleString(vscode.env.language, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  const exact = escapeHtml(`${observationDate(time)} (${date.toISOString()})`);
+  return `<time datetime="${date.toISOString()}" title="${exact}" aria-label="${exact}">${escapeHtml(label)}</time>`;
+}
+
+function observationRow(label: string, value: string): string {
+  return `<div class="prediction-row"><span class="prediction-label">${escapeHtml(label)}</span>` +
+    `<span class="prediction-value">${value}</span></div>`;
+}
+
+function observationDetails(label: string, text: string): string {
+  return `<details class="observation-details"><summary>${escapeHtml(label)}</summary>` +
+    `<div class="quota-description">${escapeHtml(text)}</div></details>`;
+}
+
 function renderConfidence(history: HistoryContext): string {
   const state = history.observations;
   if (!state) { return ""; }
   const total = state.intervals.reduce((sum, interval) => sum + interval.credits, 0);
   const attributed = state.intervals.reduce((sum, interval) => sum + (interval.project ? interval.credits : 0), 0);
   const ongoingGap = history.trackingInterrupted || (state.anchor && Date.now() - state.anchor.time > MAX_OBSERVATION_GAP_MS);
-  const lines = [
-    t("Last successful fetch: {0}", observationDate(history.lastSuccessfulFetch)),
-    t("Last observed balance change: {0}", observationDate(state.lastChange)),
-    history.timelineEnabled === false
-      ? t("Local observation tracking is disabled.")
-      : t("Local tracking began: {0}. Coverage is partial, not a complete billing-period report.", observationDate(state.firstObserved)),
-    t("Tracking gaps since local tracking began: {0}", state.gaps),
-    t("Estimated attribution coverage of retained observed credits: {0} of {1} ({2}%).",
-      attributed.toFixed(2), total.toFixed(2), total > 0 ? (100 * attributed / total).toFixed(1) : "0"),
-    t("A fresh fetch does not mean real-time GitHub accounting. Balance updates can be delayed."),
-  ];
-  if (ongoingGap) { lines.push(t("There is a tracking gap since the last valid balance observation.")); }
-  if (history.refreshFailed) { lines.unshift(t("The latest refresh failed. Showing the last successfully fetched data.")); }
-  return `<section class="observation-panel"><h3>${t("Data confidence")}</h3>${lines.map(line => `<p>${escapeHtml(line)}</p>`).join("")}</section>`;
+  const rows = [
+    observationRow(t("Last successful fetch"), observationTime(history.lastSuccessfulFetch)),
+    observationRow(t("Last observed balance change"), observationTime(state.lastChange)),
+    observationRow(t("Local tracking began"), observationTime(state.firstObserved)),
+    observationRow(t("Tracking gaps"), String(state.gaps)),
+    observationRow(t("Estimated attribution coverage"), escapeHtml(t("{0} of {1} ({2}%)",
+      attributed.toFixed(2), total.toFixed(2), total > 0 ? (100 * attributed / total).toFixed(1) : "0"))),
+  ].join("");
+  const notices = [
+    history.refreshFailed ? t("The latest refresh failed. Showing the last successfully fetched data.") : "",
+    ongoingGap ? t("There is a tracking gap since the last valid balance observation.") : "",
+    history.timelineEnabled === false ? t("Local observation tracking is disabled.") : "",
+  ].filter(Boolean).map(line => `<div class="quota-description"><strong>${escapeHtml(line)}</strong></div>`).join("");
+  return `<section class="section"><h2 class="section-title">${escapeHtml(t("Data confidence"))}</h2>` +
+    `<div class="quota-card observation-card"><div class="quota-header">` +
+    `<span class="quota-title">${escapeHtml(t("Local observations"))}</span>` +
+    `<span class="quota-badge">${escapeHtml(t("Partial coverage"))}</span></div>` +
+    notices + rows +
+    `<div class="quota-description">${escapeHtml(t("Coverage is partial. GitHub balance updates can be delayed."))}</div>` +
+    observationDetails(t("About these observations"), t("A fresh fetch does not mean real-time GitHub accounting. Balance updates can be delayed. Tracking gaps are counted since local tracking began. Estimated attribution coverage measures retained observed credits, not a complete billing-period report.")) +
+    `</div></section>`;
 }
 
 function renderTimeline(history: HistoryContext): string {
   if (!history.observations || history.timelineEnabled === false) { return ""; }
   const intervals = history.observations.intervals.filter(interval => interval.credits > 0).slice(-100).reverse();
   const rows = intervals.map(interval => {
-    const label = interval.project
-      ? t("Estimated project: {0}", interval.project) + (interval.branch ? ` · ${t("Estimated branch: {0}", interval.branch)}` : "")
-      : t("Unattributed");
-    return `<li><strong>${escapeHtml(t("{0} credits", interval.credits.toFixed(2)))}</strong><br>` +
-      `${escapeHtml(observationDate(interval.start))} – ${escapeHtml(observationDate(interval.end))}<br>` +
-      `${escapeHtml(label)}${interval.gap ? `<br>${t("Tracking gap — not a real-time spike")}` : ""}</li>`;
+    const start = new Date(interval.start);
+    const end = new Date(interval.end);
+    const dateOptions: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+    const timeOptions: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+    const date = (value: Date) => value.toLocaleDateString(vscode.env.language, dateOptions);
+    const time = (value: Date) => value.toLocaleTimeString(vscode.env.language, timeOptions);
+    const range = localDateKey(start) === localDateKey(end)
+      ? `${date(start)} · ${time(start)} – ${time(end)}`
+      : `${date(start)} · ${time(start)} – ${date(end)} · ${time(end)}`;
+    const exact = escapeHtml(`${observationDate(interval.start)} (${start.toISOString()}) – ${observationDate(interval.end)} (${end.toISOString()})`);
+    const metadata = interval.project
+      ? [t("Estimated project: {0}", interval.project), ...(interval.branch ? [t("Estimated branch: {0}", interval.branch)] : [])]
+      : [t("Unattributed")];
+    return `<li><div class="prediction-row">` +
+      `<span class="prediction-label" title="${exact}" aria-label="${exact}">${escapeHtml(range)}</span>` +
+      `<span class="pacing-value">${escapeHtml(t("{0} credits", interval.credits.toFixed(2)))}</span></div>` +
+      metadata.map(label => `<div class="quota-description" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`).join("") +
+      (interval.gap ? `<div class="quota-description"><strong>${escapeHtml(t("Tracking gap — not a real-time spike"))}</strong></div>` : "") + `</li>`;
   }).join("");
-  return `<section class="observation-panel"><h3>${t("Recent usage timeline")}</h3>` +
-    `<p>${t("Observed balance drops, newest first (up to 100). Times bound observations, not requests. Project and branch labels are local estimates, never per-request or per-model attribution.")}</p>` +
-    (rows ? `<ol class="usage-timeline">${rows}</ol>` : `<p>${t("No balance drops observed in the retained window.")}</p>`) + "</section>";
+  return `<section class="section"><h2 class="section-title">${escapeHtml(t("Recent usage timeline"))}</h2>` +
+    `<div class="quota-card observation-card"><div class="quota-header">` +
+    `<span class="quota-title">${escapeHtml(t("Observed balance drops"))}</span>` +
+    `<span class="quota-badge">${escapeHtml(t("Newest first"))}</span></div>` +
+    `<div class="quota-description">${escapeHtml(t("Updates may be delayed; project and branch attribution is approximate."))}</div>` +
+    (rows ? `<ol class="usage-timeline" tabindex="0" aria-label="${escapeHtml(t("Recent usage timeline"))}">${rows}</ol>` : `<div class="quota-description">${escapeHtml(t("No balance drops observed in the retained window."))}</div>`) +
+    observationDetails(t("How to read this timeline"), t("Observed balance drops, newest first (up to 100). Times bound observations, not requests. Project and branch labels are local estimates, never per-request or per-model attribution.")) +
+    "</div></section>";
 }
 
 function renderBudget(data: CopilotUserData, config: RenderConfig): string {
@@ -353,20 +398,30 @@ function renderBudget(data: CopilotUserData, config: RenderConfig): string {
   const ceiling = Math.max(quota.entitlement, boundedNumber(config.customLimit, 0, 0, 10_000_000));
   const calendar = config.workCalendar ?? { weekdays: [1, 2, 3, 4, 5], daysOff: [], reserve: 0, personalBudget: target };
   const capacity = workdayCapacity(ceiling - used, used, data.quota_reset_date_utc, { ...calendar, personalBudget: target });
-  const lines = [
-    t("Included plan allowance: {0} credits", quota.entitlement),
-    t("Usage derived from the reported plan balance: {0} credits", used.toFixed(2)),
-    target > 0 ? t("Personal monthly target: {0} credits; {1} credits left to target.", target, Math.max(0, target - used).toFixed(2)) : t("Personal monthly target: not set"),
-    t("GitHub-reported overage permission: {0}", quota.overage_permitted ? t("Allowed") : t("Not allowed")),
-    t("Local targets and custom limits do not change or enforce GitHub billing. Check GitHub billing settings for spending controls."),
-    t("Work-calendar capacity: {0} spendable credits after reserve across {1} remaining workdays; {2} credits per workday.",
-      capacity.spendable.toFixed(2), capacity.days, capacity.perDay.toFixed(2)),
-    t("Includes today when it is a working day. This is advisory pacing, not a forecast of request counts."),
+  const credits = (value: number) => escapeHtml(t("{0} credits", value.toFixed(2)));
+  const rows = [
+    observationRow(t("Included plan allowance"), credits(quota.entitlement)),
+    observationRow(t("Used from reported balance"), credits(used)),
+    observationRow(t("Personal monthly target"), target > 0 ? credits(target) : escapeHtml(t("Not set"))),
+    ...(target > 0 ? [observationRow(t("Left to target"), credits(Math.max(0, target - used)))] : []),
+    observationRow(t("GitHub overage permission"), escapeHtml(quota.overage_permitted ? t("Allowed") : t("Not allowed"))),
   ];
   if (config.customLimit > quota.entitlement) {
-    lines.splice(2, 0, t("Custom advisory limit: {0} credits (includes capacity beyond the plan allowance).", config.customLimit));
+    rows.splice(2, 0, observationRow(t("Custom advisory limit"), credits(config.customLimit)));
   }
-  return `<section class="observation-panel"><h3>${t("Budget and billing")}</h3>${lines.map(line => `<p>${escapeHtml(line)}</p>`).join("")}</section>`;
+  const pacingRow = (label: string, value: string) =>
+    `<div class="pacing-row"><span class="pacing-label">${escapeHtml(label)}</span><span class="pacing-value">${value}</span></div>`;
+  return `<section class="section"><h2 class="section-title">${escapeHtml(t("Budget and billing"))}</h2>` +
+    `<div class="quota-card observation-card"><div class="quota-header">` +
+    `<span class="quota-title">${escapeHtml(t("Personal budget"))}</span>` +
+    `<span class="quota-badge">${escapeHtml(t("Advisory"))}</span></div>` +
+    `<div class="quota-description">${escapeHtml(t("Personal targets are not GitHub billing controls."))}</div>` +
+    rows.join("") + `<div class="quota-pacing-highlight">` +
+    pacingRow(t("Spendable after reserve"), credits(capacity.spendable)) +
+    pacingRow(t("Remaining workdays"), String(capacity.days)) +
+    pacingRow(t("Per workday"), credits(capacity.perDay)) + `</div>` +
+    observationDetails(t("Budget and pacing details"), t("Local targets and custom limits do not change or enforce GitHub billing. Check GitHub billing settings for spending controls. A custom advisory limit can include capacity beyond the plan allowance. Includes today when it is a working day. This is advisory pacing, not a forecast of request counts.")) +
+    `</div></section>`;
 }
 
 /**

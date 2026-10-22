@@ -756,24 +756,59 @@ body {
 	color: var(--vscode-descriptionForeground);
 	margin-bottom: 10px;
 }
-/* Local observations: bounded scroll area, readable long workspace names. */
-.observation-panel {
-  margin: 12px 0;
-  padding: 12px;
-  border: 1px solid var(--vscode-widget-border);
-  border-radius: 6px;
-  overflow-wrap: anywhere;
+/* Reuse quota cards and metric rows, including in narrow sidebars. */
+.observation-card {
+	overflow-wrap: anywhere;
 }
-.observation-panel p {
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground);
+.observation-card .quota-header {
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.observation-card .prediction-row,
+.observation-card .pacing-row {
+	align-items: baseline;
+	gap: 10px;
+}
+.observation-card .prediction-label,
+.observation-card .pacing-label {
+	min-width: 0;
+	flex: 1;
+}
+.observation-card .prediction-value,
+.observation-card .pacing-value {
+	min-width: 0;
+	max-width: 55%;
+	text-align: right;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+}
+.observation-details {
+	margin-top: 8px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+.observation-details summary {
+	cursor: pointer;
+}
+.observation-details .quota-description {
+	margin: 6px 0 0;
+}
+.observation-details summary:focus-visible,
+.usage-timeline:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
 }
 .usage-timeline {
-  max-height: 340px;
-  overflow-y: auto;
-  padding-left: 22px;
+	max-height: 340px;
+	overflow-y: auto;
+	list-style: none;
+	padding: 0;
+	margin: 0;
 }
 .usage-timeline li {
-  margin-bottom: 12px;
-  font-size: 12px;
+	padding: 8px 0;
+	border-top: 1px solid var(--vscode-panel-border);
+}
+.usage-timeline li .quota-description {
+	margin-bottom: 0;
 }
