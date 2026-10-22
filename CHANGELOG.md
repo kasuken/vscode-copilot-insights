@@ -1,5 +1,17 @@
 # Change Log
 
+# [5.4.0] - 2026-10-22
+
+### Added
+- **Recent usage timeline and spike alerts**: track observed balance drops with their time intervals, review data confidence and attribution coverage, and optionally receive alerts when observed consumption crosses a configured threshold.
+- **Budget-aware workday insights**: compare plan allowance with an optional personal budget and GitHub-reported overage permission, then estimate daily capacity using configurable workdays, days off, and a credit reserve.
+
+### Fixed
+- **Stale observation data after history and privacy changes**: clearing usage history or changing attribution privacy settings now invalidates cached observations so removed data is no longer shown.
+
+### Changed
+- **Insights panel refresh behavior**: new panels follow the existing quota-card styling, and expanded explanations retain their state and focus when the view refreshes.
+
 # [5.3.0] - 2026-10-01
 
 ### Added
