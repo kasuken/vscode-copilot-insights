@@ -131,11 +131,10 @@ suite("Observation, confidence and budget rendering", () => {
     });
     const sameDay = render(end);
     const dateLabel = (when: number) => new Date(when).toLocaleDateString(vscode.env.language, { month: "short", day: "numeric", year: "numeric" });
-    const visibleText = (html: string) => html.replace(/<[^>]*>/g, "");
-    assert.strictEqual(visibleText(sameDay.sections.timeline).split(dateLabel(start)).length - 1, 1);
+    const timeLabel = (when: number) => new Date(when).toLocaleTimeString(vscode.env.language, { hour: "numeric", minute: "2-digit" });
+    assert.ok(sameDay.sections.timeline.includes(`>${dateLabel(start)} · ${timeLabel(start)} – ${timeLabel(end)}</span>`));
     const crossDay = render(nextDay).sections.timeline;
-    assert.ok(visibleText(crossDay).includes(dateLabel(start)));
-    assert.ok(visibleText(crossDay).includes(dateLabel(nextDay)));
+    assert.ok(crossDay.includes(`>${dateLabel(start)} · ${timeLabel(start)} – ${dateLabel(nextDay)} · ${timeLabel(nextDay)}</span>`));
     assert.ok(sameDay.sections.timeline.includes(`(${new Date(start).toISOString()})`));
     assert.ok(sameDay.sections.timeline.includes(`(${new Date(end).toISOString()})`));
     assert.ok(sameDay.sections.timeline.includes('aria-label="'));
