@@ -11,6 +11,11 @@ import {
 import { makeQuota } from "./quota.test";
 
 suite("Observation, confidence and budget rendering", () => {
+  test("scopes disclosure state to a normalized account identity", () => {
+    assert.strictEqual(buildViewModel(makeUserData({ login: " OctoCat " }), [], makeConfig()).account, "octocat");
+    assert.notStrictEqual(buildViewModel(makeUserData({ login: "other" }), [], makeConfig()).account, "octocat");
+  });
+
   test("escapes workspace and branch labels and distinguishes gap observations", () => {
     const now = Date.now();
     const history: HistoryContext = {
@@ -88,7 +93,7 @@ suite("Observation, confidence and budget rendering", () => {
         assert.ok(html.includes(`class="${cls}"`), `missing ${cls} in ${section}`);
       }
       assert.ok(!html.includes("observation-panel"));
-      assert.ok(html.includes('<details class="observation-details"><summary>'));
+      assert.ok(html.includes(`<details class="observation-details" id="${section}-details"><summary>`));
     }
     const visible = model.sections.confidence.split("<details")[0];
     assert.ok(visible.includes("latest refresh failed"));

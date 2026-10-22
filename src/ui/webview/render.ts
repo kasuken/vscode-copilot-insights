@@ -140,6 +140,8 @@ export interface ChartModel {
 /** Serializable model posted to the webview. Each section is prebuilt HTML. */
 export interface InsightsViewModel {
   state: "data";
+  /** Scope transient disclosure state to the displayed account. */
+  account: string;
   sections: {
     stale: string;
     confidence: string;
@@ -275,6 +277,7 @@ export function buildViewModel(
 
   return {
     state: "data",
+    account: data.login.trim().toLowerCase(),
     sections: {
       stale: isStale
         ? `<div class="warning-banner">⚠️ ${t("Data may be stale (fetched over 1 hour ago)")}</div>`
@@ -322,8 +325,8 @@ function observationRow(label: string, value: string): string {
     `<span class="prediction-value">${value}</span></div>`;
 }
 
-function observationDetails(label: string, text: string): string {
-  return `<details class="observation-details"><summary>${escapeHtml(label)}</summary>` +
+function observationDetails(id: string, label: string, text: string): string {
+  return `<details class="observation-details" id="${escapeHtml(id)}"><summary>${escapeHtml(label)}</summary>` +
     `<div class="quota-description">${escapeHtml(text)}</div></details>`;
 }
 
@@ -352,7 +355,7 @@ function renderConfidence(history: HistoryContext): string {
     `<span class="quota-badge">${escapeHtml(t("Partial coverage"))}</span></div>` +
     notices + rows +
     `<div class="quota-description">${escapeHtml(t("Coverage is partial. GitHub balance updates can be delayed."))}</div>` +
-    observationDetails(t("About these observations"), t("A fresh fetch does not mean real-time GitHub accounting. Balance updates can be delayed. Tracking gaps are counted since local tracking began. Estimated attribution coverage measures retained observed credits, not a complete billing-period report.")) +
+    observationDetails("confidence-details", t("About these observations"), t("A fresh fetch does not mean real-time GitHub accounting. Balance updates can be delayed. Tracking gaps are counted since local tracking began. Estimated attribution coverage measures retained observed credits, not a complete billing-period report.")) +
     `</div></section>`;
 }
 
@@ -385,7 +388,7 @@ function renderTimeline(history: HistoryContext): string {
     `<span class="quota-badge">${escapeHtml(t("Newest first"))}</span></div>` +
     `<div class="quota-description">${escapeHtml(t("Updates may be delayed; project and branch attribution is approximate."))}</div>` +
     (rows ? `<ol class="usage-timeline" tabindex="0" aria-label="${escapeHtml(t("Recent usage timeline"))}">${rows}</ol>` : `<div class="quota-description">${escapeHtml(t("No balance drops observed in the retained window."))}</div>`) +
-    observationDetails(t("How to read this timeline"), t("Observed balance drops, newest first (up to 100). Times bound observations, not requests. Project and branch labels are local estimates, never per-request or per-model attribution.")) +
+    observationDetails("timeline-details", t("How to read this timeline"), t("Observed balance drops, newest first (up to 100). Times bound observations, not requests. Project and branch labels are local estimates, never per-request or per-model attribution.")) +
     "</div></section>";
 }
 
@@ -420,7 +423,7 @@ function renderBudget(data: CopilotUserData, config: RenderConfig): string {
     pacingRow(t("Spendable after reserve"), credits(capacity.spendable)) +
     pacingRow(t("Remaining workdays"), String(capacity.days)) +
     pacingRow(t("Per workday"), credits(capacity.perDay)) + `</div>` +
-    observationDetails(t("Budget and pacing details"), t("Local targets and custom limits do not change or enforce GitHub billing. Check GitHub billing settings for spending controls. A custom advisory limit can include capacity beyond the plan allowance. Includes today when it is a working day. This is advisory pacing, not a forecast of request counts.")) +
+    observationDetails("budget-details", t("Budget and pacing details"), t("Local targets and custom limits do not change or enforce GitHub billing. Check GitHub billing settings for spending controls. A custom advisory limit can include capacity beyond the plan allowance. Includes today when it is a working day. This is advisory pacing, not a forecast of request counts.")) +
     `</div></section>`;
 }
 
