@@ -36,7 +36,7 @@ function client() {
     }
   }
   for (const id of ["state-loading", "state-signin", "state-error", "state-data", "error-message",
-    "last-updated", "signInButton", "copyButton", "copyJsonButton",
+    "last-updated", "signInButton", "copyButton", "copyJsonButton", "modelCostsButton",
     "section-confidence", "section-timeline", "section-budget"]) {
     elements.set(id, new Element(id));
   }

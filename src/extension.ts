@@ -15,6 +15,7 @@ import {
   serializeRollups,
 } from "./core/exporter";
 import { getLog } from "./log";
+import { registerModelCosts } from "./ui/webview/modelCosts";
 
 /** Runs one-time settings migrations, guarded by global-state flags. */
 function runMigrations(context: vscode.ExtensionContext) {
@@ -54,6 +55,7 @@ function runMigrations(context: vscode.ExtensionContext) {
 // This method is called when your extension is activated
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(getLog());
+  registerModelCosts(context);
 
   const statusBar = new StatusBarManager();
   context.subscriptions.push(statusBar);

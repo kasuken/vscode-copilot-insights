@@ -5,6 +5,22 @@ body {
 	background-color: var(--vscode-sideBar-background);
 	font-size: 13px;
 }
+.model-costs-entry {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 12px;
+	padding: 5px 0;
+	font: inherit;
+	color: var(--vscode-textLink-foreground);
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+}
+.model-costs-entry:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
 .hidden {
 	display: none !important;
 }

@@ -185,6 +185,31 @@ You can also chat with the `@insights` participant directly:
 
 ## Configuration
 
+### Model costs and estimator
+
+Use **Copilot Insights: Open Model Costs**, the sidebar link, or the table icon
+in the view toolbar. No sign-in is required. The editor tab includes searchable
+model rates, plan references, editorial task guidance, official sources, and a
+token-cost estimator. Switch rate units between USD and AI credits.
+
+Estimates are separate from your account usage. Total input includes cached reads
+and cache writes; the estimator avoids counting them twice and selects long-context
+rates above the published input threshold. Auto is a hypothetical eligible-routing
+scenario, not a guarantee that Auto will select that model. Legacy annual request
+billing is not estimated. Expired promotional model rates cannot be used for estimates.
+
+The bundled catalog works offline. **Refresh catalog** explicitly downloads the
+public JSON from `https://www.emanuelebartolesi.com/resources/github-copilot.json`,
+without sending account, workspace, or token inputs. A validated update is cached
+locally; download or validation failures keep the current snapshot. Review dates,
+source links, and a warning after 30 days make reference freshness visible.
+
+For maintainers: `npm run sync-model-catalog` refreshes the bundled snapshot from
+the published endpoint. Before website deployment, use
+`npm run sync-model-catalog -- --website ../website` to generate it from the website's
+source endpoint. Commit the generated snapshot with the extension changes. Normal
+extension builds do not need network access or the website checkout.
+
 Search for "Copilot Insights" in VS Code Settings or use the settings button in the view title bar.
 
 Key settings:

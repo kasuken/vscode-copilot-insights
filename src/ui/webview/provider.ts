@@ -310,6 +310,9 @@ export class CopilotInsightsViewProvider implements vscode.WebviewViewProvider, 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
+        case "modelCosts":
+          await vscode.commands.executeCommand("vscode-copilot-insights.modelCosts");
+          break;
         case "ready":
           // The webview (re)loaded — sync it with the latest known state.
           this._postState(this._lastStateMessage);

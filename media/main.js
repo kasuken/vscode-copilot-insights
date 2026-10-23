@@ -4,6 +4,9 @@
 // replaced, refreshes preserve the scroll position.
 (function () {
   const vscode = acquireVsCodeApi();
+  document.getElementById("modelCostsButton").addEventListener("click", () => {
+    vscode.postMessage({ command: "modelCosts" });
+  });
   let lastModel;
   let previousDataModel;
 

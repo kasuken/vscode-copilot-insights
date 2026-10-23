@@ -15,6 +15,7 @@ suite("Extension", () => {
     const commands = await vscode.commands.getCommands(true);
     for (const id of [
       "vscode-copilot-insights.refresh",
+      "vscode-copilot-insights.modelCosts",
       "vscode-copilot-insights.openSettings",
       "vscode-copilot-insights.resetToDefaults",
     ]) {

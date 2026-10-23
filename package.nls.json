@@ -1,4 +1,5 @@
 {
+  "copilotInsights.command.modelCosts.title": "Copilot Insights: Open Model Costs",
   "copilotInsights.viewsContainer.title": "Copilot Insights",
   "copilotInsights.view.insights.name": "Insights",
   "copilotInsights.command.refresh.title": "Copilot Insights: Refresh",

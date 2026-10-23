@@ -193,6 +193,7 @@ export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Ur
 	<title>Copilot Insights</title>
 </head>
 <body>
+  <button id="modelCostsButton" class="model-costs-entry"><span class="codicon codicon-table" aria-hidden="true"></span> ${t("Model costs and estimator")}</button>
 	<div id="state-loading" class="state loading">${t("Loading Copilot data...")}</div>
 
 	<div id="state-signin" class="state signin hidden">

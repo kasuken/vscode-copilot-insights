@@ -67,6 +67,11 @@
     },
     "commands": [
       {
+        "command": "vscode-copilot-insights.modelCosts",
+        "title": "%copilotInsights.command.modelCosts.title%",
+        "icon": "$(table)"
+      },
+      {
         "command": "vscode-copilot-insights.refresh",
         "title": "%copilotInsights.command.refresh.title%",
         "icon": "$(refresh)"
@@ -103,6 +108,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "vscode-copilot-insights.modelCosts",
+          "when": "view == copilotInsights.sidebarView",
+          "group": "navigation"
+        },
         {
           "command": "vscode-copilot-insights.refresh",
           "when": "view == copilotInsights.sidebarView",
@@ -434,6 +444,7 @@
     ]
   },
   "scripts": {
+    "sync-model-catalog": "node scripts/sync-model-catalog.mjs",
     "vscode:prepublish": "npm run package",
     "copy-assets": "node scripts/copy-codicons.mjs",
     "check-types": "tsc --noEmit -p ./",
