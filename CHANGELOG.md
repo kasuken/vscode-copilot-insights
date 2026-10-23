@@ -1,5 +1,13 @@
 # Change Log
 
+# [5.5.0] - 2026-10-23
+
+### Added
+- **Model Costs explorer**: open a dedicated editor tab from the sidebar or the new **Copilot Insights: Open Model Costs** command to search and compare model rates in USD or AI credits, including published long-context tiers.
+- **Token-cost estimator**: estimate costs from input, cached input, cache-write, and output tokens, with automatic context-tier selection and eligible Auto discount scenarios. Estimates remain separate from account usage, and expired promotional rates and legacy annual request billing are excluded.
+- **Plans, guidance, and sources**: compare monthly paid plans, review editorial task recommendations and Auto/HydraFusion guidance, and open the official documentation without signing in.
+- **Offline model catalog and refresh**: use a bundled snapshot shared with the website's versioned JSON catalog, explicitly refresh and cache validated updates, and see review dates and stale-data warnings. Failed updates retain the current snapshot; account, workspace, and token inputs are never sent with catalog requests.
+
 # [5.4.0] - 2026-10-22
 
 ### Added
