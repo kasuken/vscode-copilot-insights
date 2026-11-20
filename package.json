@@ -2,7 +2,7 @@
   "name": "vscode-copilot-insights",
   "displayName": "Copilot Insights",
   "description": "Understand your GitHub Copilot plan, quotas, and limits at a glance",
-  "version": "5.5.0",
+  "version": "6.0.0",
   "publisher": "emanuelebartolesi",
   "icon": "img/logo.png",
   "sponsor": {
@@ -348,32 +348,6 @@
         }
       }
     },
-    "chatParticipants": [
-      {
-        "id": "copilotInsights.insights",
-        "name": "insights",
-        "fullName": "Copilot Insights",
-        "description": "%copilotInsights.chatParticipant.description%",
-        "commands": [
-          {
-            "name": "quota",
-            "description": "%copilotInsights.chatParticipant.quota.description%"
-          },
-          {
-            "name": "pacing",
-            "description": "%copilotInsights.chatParticipant.pacing.description%"
-          },
-          {
-            "name": "forecast",
-            "description": "%copilotInsights.chatParticipant.forecast.description%"
-          },
-          {
-            "name": "projects",
-            "description": "%copilotInsights.chatParticipant.projects.description%"
-          }
-        ]
-      }
-    ],
     "languageModelTools": [
       {
         "name": "insights_getCopilotQuota",

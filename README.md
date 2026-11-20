@@ -176,13 +176,6 @@ You can also package and install locally from a VSIX during development.
 
 Ask Copilot Chat about your quota — reference the `#copilotQuota` tool in your prompt (or just ask "how many AI credits do I have left?" in agent mode) and it will answer using your live quota data.
 
-You can also chat with the `@insights` participant directly:
-
-- `@insights /quota` — your current plan and AI credit quota.
-- `@insights /pacing` — how your usage compares to the pace needed to last until reset.
-- `@insights /forecast` — a projection of when your credits will run out.
-- `@insights /projects` — which projects your credits went to this period.
-
 ## Configuration
 
 ### Model costs and estimator

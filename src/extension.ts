@@ -3,7 +3,6 @@ import * as vscode from "vscode";
 import { StatusBarManager } from "./ui/statusBar";
 import { CopilotInsightsViewProvider } from "./ui/webview/provider";
 import { CopilotQuotaTool } from "./lmTool";
-import { registerChatParticipant } from "./chatParticipant";
 import { fetchOrgCopilotMetrics } from "./api/orgMetricsApi";
 import { buildOrgMetricsMarkdown } from "./core/orgMetrics";
 import { getGitHubHostConfig } from "./core/githubHost";
@@ -80,9 +79,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.lm.registerTool("insights_getCopilotQuota", new CopilotQuotaTool(provider))
   );
-
-  // Chat participant so users can ask @insights about quota, pacing, forecast
-  registerChatParticipant(context, provider);
 
   // Trigger initial data load to populate status bars.
   // Silent: never prompt for GitHub sign-in at startup — interactive auth

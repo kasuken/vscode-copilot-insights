@@ -1,5 +1,10 @@
 # Change Log
 
+# [6.0.0] - 2026-11-20
+
+### Breaking changes
+- **Copilot Chat participant removed**: the deprecated `@insights` participant and its `/quota`, `/pacing`, `/forecast`, and `/projects` commands are no longer available. There is no migration required; use the `#copilotQuota` language-model tool for quota questions.
+
 # [5.5.0] - 2026-10-23
 
 ### Added
